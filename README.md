@@ -26,3 +26,7 @@ http://localhost:3100
 - Memoria ligera y anti-spam Telegram.
 
 No incluye opciones, Level 2, unusual flow, IV ni ejecucion automatica de ordenes.
+
+## Mac
+
+Ver [MAC_SETUP.md](MAC_SETUP.md).
