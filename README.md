@@ -30,3 +30,7 @@ No incluye opciones, Level 2, unusual flow, IV ni ejecucion automatica de ordene
 ## Mac
 
 Ver [MAC_SETUP.md](MAC_SETUP.md).
+
+## Windows
+
+Ver [WINDOWS_SETUP.md](WINDOWS_SETUP.md).
