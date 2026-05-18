@@ -1,0 +1,59 @@
+{
+  "server": {
+    "port": 3100
+  },
+  "scan": {
+    "minScore": 75,
+    "maxResultsPerSide": 5,
+    "maxUniverseSize": 240,
+    "historyRange": "1y",
+    "historyInterval": "1d",
+    "requestConcurrency": 6
+  },
+  "filters": {
+    "minPrice": 5,
+    "minAvgVolume20": 800000,
+    "maxAtrPct": 0.12,
+    "minHistoryBars": 220,
+    "minRR": 2
+  },
+  "scoreWeights": {
+    "trend": 25,
+    "volume": 25,
+    "momentum": 20,
+    "structure": 20,
+    "riskReward": 10
+  },
+  "cacheTtlSeconds": {
+    "chart": 300,
+    "quote": 60,
+    "movers": 180
+  },
+  "alerts": {
+    "cooldownMinutes": 30,
+    "minScoreChangeToResend": 8,
+    "maxTelegramCandidates": 10
+  },
+  "excludeCandidateSymbols": [
+    "SPY",
+    "QQQ",
+    "IWM",
+    "DIA",
+    "TLT",
+    "GLD",
+    "SLV",
+    "XLF",
+    "XLE",
+    "XLK",
+    "XLY",
+    "XLP",
+    "XLV",
+    "XLI",
+    "XLU",
+    "XLRE",
+    "XLB",
+    "SMH",
+    "SOXX",
+    "ARKK"
+  ]
+}

@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Screener IC V1</title>
+  <style>
+    :root {
+      --bg: #08090b;
+      --panel: #111318;
+      --panel-2: #171a21;
+      --text: #e8eaed;
+      --muted: #8c93a1;
+      --line: #252a34;
+      --green: #24c17a;
+      --red: #ef5555;
+      --amber: #f2b84b;
+      --blue: #62a8ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Arial, sans-serif;
+      letter-spacing: 0;
+    }
+    button, input { font: inherit; }
+    .shell { max-width: 1180px; margin: 0 auto; padding: 18px; }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid var(--line);
+      background: rgba(8, 9, 11, 0.94);
+      backdrop-filter: blur(10px);
+    }
+    .topbar-inner {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    h1 { font-size: 15px; margin: 0; letter-spacing: 0.16em; text-transform: uppercase; }
+    .status-dot { width: 9px; height: 9px; border-radius: 999px; background: #3b3f4a; }
+    .status-dot.running { background: var(--amber); box-shadow: 0 0 0 5px rgba(242,184,75,0.12); }
+    .status-dot.done { background: var(--green); }
+    .spacer { flex: 1; min-width: 24px; }
+    .btn {
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0 12px;
+      cursor: pointer;
+    }
+    .btn:hover { border-color: #3a4150; }
+    .btn.primary { background: #f2b84b; border-color: #f2b84b; color: #15110a; font-weight: 700; }
+    .btn.green { background: #133e2b; border-color: #1d6d48; color: #a7f3d0; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .full { grid-column: 1 / -1; }
+    .panel {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .panel-head {
+      min-height: 44px;
+      padding: 11px 13px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-title { font-size: 12px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; }
+    .panel-body { padding: 12px; }
+    .muted { color: var(--muted); }
+    .tiny { font-size: 11px; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .metric { border: 1px solid var(--line); background: #0c0e12; border-radius: 7px; padding: 10px; min-height: 70px; }
+    .metric-label { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+    .metric-value { font-size: 20px; font-weight: 800; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+    .tab { border: 1px solid var(--line); background: #0c0e12; color: var(--muted); border-radius: 7px; padding: 8px 10px; cursor: pointer; }
+    .tab.active { color: var(--text); border-color: #4b5563; background: #151922; }
+    .candidate {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 10px;
+      background: #0c0e12;
+    }
+    .candidate.long { border-left: 4px solid var(--green); }
+    .candidate.short { border-left: 4px solid var(--red); }
+    .candidate-main { display: flex; gap: 12px; align-items: flex-start; }
+    .ticker { font-size: 22px; font-weight: 900; min-width: 80px; }
+    .score { margin-left: auto; font-size: 24px; font-weight: 900; }
+    .score.good { color: var(--green); }
+    .score.mid { color: var(--amber); }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      border-radius: 999px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 11px;
+      margin: 4px 6px 0 0;
+      white-space: nowrap;
+    }
+    .tag.long { color: #a7f3d0; border-color: #1d6d48; background: #0f2b20; }
+    .tag.short { color: #fecaca; border-color: #7f1d1d; background: #2b1010; }
+    .detail-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+    .detail { border: 1px solid #1f2430; border-radius: 6px; padding: 7px; min-height: 52px; }
+    .detail span { display: block; color: var(--muted); font-size: 10px; margin-bottom: 4px; }
+    .breakdown { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+    .bar { height: 7px; background: #20242e; border-radius: 999px; overflow: hidden; margin-top: 8px; }
+    .bar > div { height: 100%; background: var(--amber); }
+    .log {
+      height: 170px;
+      overflow: auto;
+      background: #06070a;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 8px;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+      color: #b8c0cf;
+    }
+    .watchlist { display: flex; gap: 8px; flex-wrap: wrap; }
+    .watch-pill { border: 1px solid var(--line); border-radius: 999px; padding: 6px 9px; background: #0c0e12; }
+    .watch-input { min-height: 34px; background: #0c0e12; color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 0 10px; width: 120px; }
+    .notice { border-top: 1px solid var(--line); color: var(--muted); padding: 12px 18px 28px; text-align: center; font-size: 12px; }
+    @media (max-width: 850px) {
+      .grid, .metrics, .detail-grid { grid-template-columns: 1fr; }
+      .candidate-main { flex-wrap: wrap; }
+      .score { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div id="statusDot" class="status-dot"></div>
+      <h1>Screener IC V1</h1>
+      <span id="telegramState" class="tag">Telegram: checking</span>
+      <span id="sessionState" class="tag">Session: n/a</span>
+      <div class="spacer"></div>
+      <button id="scanBtn" class="btn primary">Scan Market</button>
+      <button id="sendBtn" class="btn green" disabled>Send Top to Telegram</button>
+    </div>
+  </div>
+
+  <main class="shell">
+    <section class="panel full">
+      <div class="panel-head">
+        <div class="panel-title">Market Radar</div>
+        <span id="timestamp" class="muted tiny">No scan yet</span>
+      </div>
+      <div class="panel-body">
+        <div class="metrics">
+          <div class="metric"><div class="metric-label">Market regime</div><div id="regime" class="metric-value">--</div></div>
+          <div class="metric"><div class="metric-label">Universe</div><div id="universe" class="metric-value">0</div></div>
+          <div class="metric"><div class="metric-label">Long / Short</div><div id="counts" class="metric-value">0 / 0</div></div>
+          <div class="metric"><div class="metric-label">Elapsed</div><div id="elapsed" class="metric-value">--</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid" style="margin-top:14px">
+      <div class="panel">
+        <div class="panel-head"><div class="panel-title">Candidates</div></div>
+        <div class="panel-body">
+          <div class="tabs">
+            <button class="tab active" data-tab="long">LONG</button>
+            <button class="tab" data-tab="short">SHORT</button>
+            <button class="tab" data-tab="near">Near misses</button>
+          </div>
+          <div id="candidateList" class="muted">Run a scan to see candidates.</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><div class="panel-title">System</div></div>
+        <div class="panel-body">
+          <div id="log" class="log"></div>
+          <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
+            <input id="watchInput" class="watch-input" placeholder="Ticker">
+            <button id="addWatchBtn" class="btn">Add watch</button>
+            <button id="copyBtn" class="btn">Copy top tickers</button>
+          </div>
+          <div style="margin-top:12px">
+            <div class="muted tiny" style="margin-bottom:6px">Watchlist</div>
+            <div id="watchlist" class="watchlist"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="notice">Este screener genera candidatos para analisis manual y educativo. No constituye recomendacion financiera.</div>
+
+  <script>
+    const state = {
+      config: null,
+      memory: null,
+      result: null,
+      tab: 'long',
+      running: false
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const fmt = (n, d = 2) => Number.isFinite(Number(n)) ? Number(n).toFixed(d) : '--';
+
+    function logLine(text) {
+      const time = new Date().toLocaleTimeString();
+      $('log').innerHTML += `<div>[${time}] ${escapeHtml(text)}</div>`;
+      $('log').scrollTop = $('log').scrollHeight;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
+    }
+
+    async function api(path, options = {}) {
+      const res = await fetch(path, {
+        ...options,
+        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      return data;
+    }
+
+    async function init() {
+      state.config = await api('/api/config');
+      state.memory = await api('/api/memory');
+      $('telegramState').textContent = state.config.telegramConfigured ? 'Telegram: ready' : 'Telegram: not configured';
+      renderWatchlist();
+      bindEvents();
+      logLine('Ready. Press Scan Market.');
+    }
+
+    function bindEvents() {
+      $('scanBtn').addEventListener('click', runScan);
+      $('sendBtn').addEventListener('click', sendTelegram);
+      $('addWatchBtn').addEventListener('click', addWatch);
+      $('copyBtn').addEventListener('click', copyTopTickers);
+      document.querySelectorAll('.tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.tab = btn.dataset.tab;
+          document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b === btn));
+          renderCandidates();
+        });
+      });
+    }
+
+    async function runScan() {
+      if (state.running) return;
+      state.running = true;
+      $('statusDot').className = 'status-dot running';
+      $('scanBtn').disabled = true;
+      $('sendBtn').disabled = true;
+      logLine('Starting market scan...');
+      try {
+        const started = performance.now();
+        state.result = await api('/api/scan');
+        const elapsed = ((performance.now() - started) / 1000).toFixed(1);
+        $('statusDot').className = 'status-dot done';
+        $('elapsed').textContent = `${elapsed}s`;
+        $('timestamp').textContent = new Date(state.result.timestamp).toLocaleString();
+        $('sessionState').textContent = state.result.session?.label || 'Session: n/a';
+        $('regime').textContent = state.result.market?.bias || '--';
+        $('universe').textContent = state.result.universeSize || 0;
+        $('counts').textContent = `${state.result.longCandidates.length} / ${state.result.shortCandidates.length}`;
+        $('sendBtn').disabled = !topCandidates().length || !state.config.telegramConfigured;
+        logLine(`Scan complete: ${state.result.longCandidates.length} long, ${state.result.shortCandidates.length} short.`);
+        if (state.result.errorCount) logLine(`Partial errors: ${state.result.errorCount}.`);
+        renderCandidates();
+      } catch (error) {
+        $('statusDot').className = 'status-dot';
+        logLine(`Error: ${error.message}`);
+      } finally {
+        state.running = false;
+        $('scanBtn').disabled = false;
+      }
+    }
+
+    function renderCandidates() {
+      const list = $('candidateList');
+      if (!state.result) {
+        list.textContent = 'Run a scan to see candidates.';
+        return;
+      }
+      const data = state.tab === 'long'
+        ? state.result.longCandidates
+        : state.tab === 'short'
+          ? state.result.shortCandidates
+          : state.result.nearMisses;
+      if (!data.length) {
+        list.innerHTML = '<span class="muted">No candidates in this tab.</span>';
+        return;
+      }
+      list.innerHTML = data.map(renderCandidate).join('');
+      document.querySelectorAll('[data-watch]').forEach(btn => {
+        btn.addEventListener('click', () => updateWatch(btn.dataset.watch, 'add'));
+      });
+    }
+
+    function renderCandidate(c) {
+      const sideClass = c.bias === 'LONG' ? 'long' : 'short';
+      const scoreClass = c.score >= 85 ? 'good' : 'mid';
+      const b = c.scoreBreakdown || {};
+      const m = c.metrics || {};
+      const scoreWidth = Math.max(4, Math.min(100, c.score));
+      return `
+        <article class="candidate ${sideClass}">
+          <div class="candidate-main">
+            <div>
+              <div class="ticker">${escapeHtml(c.ticker)}</div>
+              <span class="tag ${sideClass}">${escapeHtml(c.bias)}</span>
+              <span class="tag">${escapeHtml(c.setup)}</span>
+            </div>
+            <div style="flex:1">
+              <div><strong>${escapeHtml(c.whyItMatters)}</strong></div>
+              <div class="muted tiny" style="margin-top:5px">${escapeHtml(c.risk)}</div>
+              <div class="bar"><div style="width:${scoreWidth}%"></div></div>
+            </div>
+            <div class="score ${scoreClass}">${c.score}</div>
+          </div>
+          <div class="detail-grid">
+            <div class="detail"><span>Entry</span>${escapeHtml(c.entryIdea)}</div>
+            <div class="detail"><span>Stop</span>${escapeHtml(c.stopIdea)}</div>
+            <div class="detail"><span>Target</span>${escapeHtml(c.targetIdea)}</div>
+            <div class="detail"><span>R:R</span>${fmt(c.riskReward, 2)}</div>
+            <div class="detail"><span>Volume</span>${escapeHtml(c.volume)}</div>
+            <div class="detail"><span>Price</span>$${fmt(m.price, 2)}</div>
+            <div class="detail"><span>RSI14</span>${fmt(m.rsi14, 1)}</div>
+            <div class="detail"><span>SMA50/200</span>${fmt(m.sma50, 2)} / ${fmt(m.sma200, 2)}</div>
+            <div class="detail"><span>Rel Strength</span>${escapeHtml(c.relativeStrength)}</div>
+            <div class="detail"><span>Compression</span>${escapeHtml(m.compression || '--')}</div>
+          </div>
+          <div class="breakdown">
+            <span class="tag">Trend ${b.trend ?? 0}/25</span>
+            <span class="tag">Volume ${b.volume ?? 0}/25</span>
+            <span class="tag">Momentum ${b.momentum ?? 0}/20</span>
+            <span class="tag">Structure ${b.structure ?? 0}/20</span>
+            <span class="tag">R:R ${b.riskReward ?? 0}/10</span>
+            <button class="btn" data-watch="${escapeHtml(c.ticker)}" style="margin-left:auto">Watch</button>
+          </div>
+        </article>
+      `;
+    }
+
+    function topCandidates() {
+      if (!state.result) return [];
+      return [...state.result.longCandidates, ...state.result.shortCandidates];
+    }
+
+    async function sendTelegram() {
+      const candidates = topCandidates();
+      if (!candidates.length) return;
+      $('sendBtn').disabled = true;
+      logLine('Sending candidates to Telegram...');
+      try {
+        const result = await api('/api/telegram/send', {
+          method: 'POST',
+          body: JSON.stringify({ candidates })
+        });
+        logLine(`Telegram sent: ${result.sent}, skipped: ${result.skipped}.`);
+      } catch (error) {
+        logLine(`Telegram error: ${error.message}`);
+      } finally {
+        $('sendBtn').disabled = false;
+      }
+    }
+
+    async function addWatch() {
+      const symbol = $('watchInput').value.trim().toUpperCase();
+      if (!symbol) return;
+      await updateWatch(symbol, 'add');
+      $('watchInput').value = '';
+    }
+
+    async function updateWatch(symbol, action) {
+      state.memory = await api('/api/watchlist', {
+        method: 'POST',
+        body: JSON.stringify({ symbol, action })
+      });
+      renderWatchlist();
+      logLine(`${symbol} ${action === 'remove' ? 'removed' : 'added'} to watchlist.`);
+    }
+
+    function renderWatchlist() {
+      const items = state.memory?.watchlist || [];
+      $('watchlist').innerHTML = items.length
+        ? items.map(s => `<button class="watch-pill" data-remove="${escapeHtml(s)}">${escapeHtml(s)} x</button>`).join('')
+        : '<span class="muted tiny">Empty</span>';
+      document.querySelectorAll('[data-remove]').forEach(btn => {
+        btn.addEventListener('click', () => updateWatch(btn.dataset.remove, 'remove'));
+      });
+    }
+
+    async function copyTopTickers() {
+      const text = topCandidates().map(c => c.ticker).join(', ');
+      if (!text) return;
+      await navigator.clipboard.writeText(text);
+      logLine(`Copied: ${text}`);
+    }
+
+    init().catch(error => logLine(`Init error: ${error.message}`));
+  </script>
+</body>
+</html>

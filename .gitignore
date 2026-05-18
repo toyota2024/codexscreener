@@ -1,0 +1,8 @@
+.env
+cache/*
+logs/*
+data/last-scan.json
+server.out.log
+server.err.log
+node_modules/
+npm-debug.log*
