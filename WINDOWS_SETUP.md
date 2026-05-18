@@ -30,6 +30,18 @@ cd codexscreener
 
 ## 3. Ejecutar la app
 
+Opcion mas simple:
+
+Haz doble click en:
+
+```txt
+START_WINDOWS.cmd
+```
+
+Eso abre el navegador y arranca el servidor local.
+
+---
+
 Opcion recomendada:
 
 ```powershell
@@ -75,3 +87,4 @@ node server.js
 - No abras `screener-ic.html` con doble click; usa siempre el servidor.
 - El servidor debe quedarse abierto mientras usas la app.
 - Para cerrar el servidor, presiona `Ctrl + C` en PowerShell.
+- En Windows puedes usar `START_WINDOWS.cmd` con doble click.

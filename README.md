@@ -34,3 +34,5 @@ Ver [MAC_SETUP.md](MAC_SETUP.md).
 ## Windows
 
 Ver [WINDOWS_SETUP.md](WINDOWS_SETUP.md).
+
+En Windows tambien puedes abrir la app con doble click en `START_WINDOWS.cmd`.
