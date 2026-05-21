@@ -25,6 +25,10 @@ function buildSide(bias, symbol, m, market, config) {
   const risks = detectRisks(bias, m, market, riskReward.rr);
   return {
     ticker: symbol,
+    name: m.name || '',
+    sector: m.sector || '',
+    sectorEtf: m.sectorEtf || '',
+    sectorTrend: m.sectorTrend || '',
     bias,
     score: Math.round(clamp(total, 0, 100)),
     setup,
@@ -136,11 +140,15 @@ function scoreRiskReward(bias, m, config) {
   let stop;
   let target;
   if (bias === 'LONG') {
-    stop = Math.min(entry - m.atr14 * 1.2, (m.low10Prev || entry) - m.atr14 * 0.2);
-    target = Math.max(entry + m.atr14 * 2.5, m.high20Prev || entry);
+    const stopTecnico = (m.low10Prev || entry) - m.atr14 * 0.2;
+    const stopATR = entry - m.atr14 * 1.5;
+    stop = Math.max(stopTecnico, stopATR);
+    target = Math.max(entry + m.atr14 * 3.0, m.high20Prev || entry);
   } else {
-    stop = Math.max(entry + m.atr14 * 1.2, (m.high10Prev || entry) + m.atr14 * 0.2);
-    target = Math.min(entry - m.atr14 * 2.5, m.low20Prev || entry);
+    const stopTecnico = (m.high10Prev || entry) + m.atr14 * 0.2;
+    const stopATR = entry + m.atr14 * 1.5;
+    stop = Math.min(stopTecnico, stopATR);
+    target = Math.min(entry - m.atr14 * 3.0, m.low20Prev || entry);
   }
   const reward = bias === 'LONG' ? target - entry : entry - target;
   const risk = bias === 'LONG' ? entry - stop : stop - entry;

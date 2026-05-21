@@ -2,7 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { httpsJson } = require('./utils/http');
-const { readJson, writeJson } = require('./utils/helpers');
+const { readJson, writeJson, round } = require('./utils/helpers');
 const { log } = require('./utils/logger');
 const { runScan } = require('./scanners/scanEngine');
 const { sendCandidates, getTelegramConfig } = require('./telegram/telegramBot');
@@ -10,6 +10,7 @@ const { sendCandidates, getTelegramConfig } = require('./telegram/telegramBot');
 const ROOT = __dirname;
 const CONFIG_PATH = path.join(ROOT, 'config.json');
 const MEMORY_PATH = path.join(ROOT, 'data', 'memory.json');
+const HISTORY_PATH = path.join(ROOT, 'data', 'history.json');
 const config = readJson(CONFIG_PATH, {});
 const PORT = Number(process.env.PORT || config.server?.port || 3100);
 
@@ -35,6 +36,81 @@ function readBody(req) {
     });
     req.on('error', reject);
   });
+}
+
+function readHistory() {
+  return readJson(HISTORY_PATH, []);
+}
+
+function saveHistoryEntry(result) {
+  const history = readHistory();
+  const allCandidates = [
+    ...(result.longCandidates || []),
+    ...(result.shortCandidates || []),
+    ...(result.monitoringCandidates || [])
+  ];
+  const entry = {
+    id: result.timestamp,
+    fecha: result.timestamp,
+    mercado: result.market?.bias || 'NEUTRAL',
+    candidatos: allCandidates.map(c => ({
+      ticker: c.ticker,
+      nombre: c.name || '',
+      sector: c.sector || '',
+      bias: c.bias,
+      score: c.score,
+      rr: c.riskReward,
+      entrada: c.metrics?.price || null,
+      stop: parseFloat(String(c.stopIdea || '').replace(/[^\d.-]/g, '')) || null,
+      target: parseFloat(c.targetIdea) || null,
+      setup: c.setup || '',
+      resultado_5d: null,
+      resultado_15d: null,
+      resultado_30d: null
+    }))
+  };
+  history.push(entry);
+  const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  const filtered = history.filter(e => new Date(e.fecha).getTime() > cutoff);
+  writeJson(HISTORY_PATH, filtered);
+}
+
+async function fetchCurrentPrice(symbol) {
+  try {
+    const data = await httpsJson('query1.finance.yahoo.com',
+      `/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d&includePrePost=false`);
+    return data?.chart?.result?.[0]?.meta?.regularMarketPrice || null;
+  } catch {
+    return null;
+  }
+}
+
+async function updateHistoryResults() {
+  const history = readHistory();
+  let count = 0;
+  const now = Date.now();
+  for (const entry of history) {
+    const entryTime = new Date(entry.fecha).getTime();
+    const daysSince = (now - entryTime) / 86400000;
+    for (const c of entry.candidatos) {
+      const needs5 = c.resultado_5d === null && daysSince >= 5;
+      const needs15 = c.resultado_15d === null && daysSince >= 15;
+      const needs30 = c.resultado_30d === null && daysSince >= 30;
+      if ((needs5 || needs15 || needs30) && c.entrada) {
+        const price = await fetchCurrentPrice(c.ticker);
+        if (price) {
+          const ret = c.bias === 'SHORT'
+            ? round(((c.entrada - price) / c.entrada) * 100, 2)
+            : round(((price - c.entrada) / c.entrada) * 100, 2);
+          if (needs5) { c.resultado_5d = ret; count++; }
+          if (needs15) { c.resultado_15d = ret; count++; }
+          if (needs30) { c.resultado_30d = ret; count++; }
+        }
+      }
+    }
+  }
+  if (count > 0) writeJson(HISTORY_PATH, history);
+  return { updated: count };
 }
 
 function serveFile(res, filePath) {
@@ -95,6 +171,7 @@ async function handle(req, res) {
         short: result.shortCandidates.map(c => c.ticker)
       };
       writeJson(MEMORY_PATH, memory);
+      saveHistoryEntry(result);
       return sendJson(res, 200, result);
     }
 
@@ -103,6 +180,15 @@ async function handle(req, res) {
       const candidates = Array.isArray(body.candidates) ? body.candidates : [];
       if (!candidates.length) return sendJson(res, 400, { error: 'No candidates provided' });
       const result = await sendCandidates(candidates, config, Boolean(body.force));
+      return sendJson(res, 200, result);
+    }
+
+    if (url.pathname === '/api/history') {
+      return sendJson(res, 200, readHistory());
+    }
+
+    if (url.pathname === '/api/update-results') {
+      const result = await updateHistoryResults();
       return sendJson(res, 200, result);
     }
 

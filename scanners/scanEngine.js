@@ -10,6 +10,19 @@ const { detectMarketRegime } = require('./marketRegime');
 const { getMarketSession } = require('../utils/marketHours');
 
 const ROOT = path.join(__dirname, '..');
+const SECTOR_ETFS = {
+  Technology: 'XLK',
+  Healthcare: 'XLV',
+  Financials: 'XLF',
+  Energy: 'XLE',
+  Utilities: 'XLU',
+  'Consumer Discretionary': 'XLY',
+  'Consumer Staples': 'XLP',
+  Industrials: 'XLI',
+  Materials: 'XLB',
+  'Real Estate': 'XLRE',
+  Communication: 'XLC'
+};
 
 async function runScan(config) {
   const startedAt = Date.now();
@@ -20,6 +33,7 @@ async function runScan(config) {
   const market = detectMarketRegime(indexMetrics.spy, indexMetrics.qqq);
   const spy20 = indexMetrics.spy?.returns20d || 0;
   const qqq20 = indexMetrics.qqq?.returns20d || 0;
+  const sectorMetricCache = new Map();
 
   const analyzed = [];
   await mapLimit(universe, config.scan.requestConcurrency, async symbol => {
@@ -33,6 +47,11 @@ async function runScan(config) {
         analyzed.push({ ticker: symbol, veto: veto.reasons });
         return;
       }
+      const profile = await loadSymbolProfile(symbol, config);
+      const sectorContext = await loadSectorContext(profile.sector, config, sectorMetricCache);
+      metrics.sector = sectorContext.sector;
+      metrics.sectorEtf = sectorContext.etf;
+      metrics.sectorTrend = sectorContext.trend;
       const scored = scoreCandidate(symbol, metrics, market, config);
       analyzed.push({
         ticker: symbol,
@@ -46,19 +65,31 @@ async function runScan(config) {
     }
   });
 
+  const allScored = analyzed
+    .flatMap(item => [item.long, item.short].filter(Boolean));
+
+  const isPrimary = item => item.score >= config.scan.minScore && item.riskReward >= config.filters.minRR;
+
   const longs = analyzed
     .map(item => item.long)
     .filter(Boolean)
-    .filter(item => item.score >= config.scan.minScore)
+    .filter(isPrimary)
     .sort((a, b) => b.score - a.score)
     .slice(0, config.scan.maxResultsPerSide);
 
   const shorts = analyzed
     .map(item => item.short)
     .filter(Boolean)
-    .filter(item => item.score >= config.scan.minScore)
+    .filter(isPrimary)
     .sort((a, b) => b.score - a.score)
     .slice(0, config.scan.maxResultsPerSide);
+
+  const primaryKeys = new Set([...longs, ...shorts].map(item => `${item.ticker}:${item.bias}`));
+  const monitoringCandidates = allScored
+    .filter(item => item.score >= 70)
+    .filter(item => !primaryKeys.has(`${item.ticker}:${item.bias}`))
+    .sort((a, b) => b.score - a.score || b.riskReward - a.riskReward)
+    .slice(0, 12);
 
   const nearMisses = analyzed
     .flatMap(item => [item.long, item.short].filter(Boolean))
@@ -77,6 +108,7 @@ async function runScan(config) {
     errorCount: errors.length,
     longCandidates: longs,
     shortCandidates: shorts,
+    monitoringCandidates,
     nearMisses,
     errors: errors.slice(0, 20),
     disclaimer: 'Este screener genera candidatos para analisis manual y educativo. No constituye recomendacion financiera.'
@@ -86,6 +118,7 @@ async function runScan(config) {
   log('info', 'Scan completed', {
     longs: longs.length,
     shorts: shorts.length,
+    monitoring: monitoringCandidates.length,
     universe: universe.length,
     elapsedMs: result.elapsedMs
   });
@@ -145,8 +178,52 @@ async function loadIndexMetrics(config, errors) {
 }
 
 async function loadSymbolMetrics(symbol, config) {
-  const candles = await loadHistory(symbol, config);
-  return enrichCandles(candles);
+  const history = await loadHistory(symbol, config);
+  const metrics = enrichCandles(history.candles);
+  metrics.name = history.name;
+  return metrics;
+}
+
+async function loadSymbolProfile(symbol, config) {
+  try {
+    const ttl = config.cacheTtlSeconds.profile || 86400;
+    const pathName = `/v1/finance/search?q=${encodeURIComponent(symbol)}&quotesCount=5&newsCount=0`;
+    const { value } = await withCache(`profile:${symbol}`, ttl, () =>
+      httpsJson('query1.finance.yahoo.com', pathName)
+    );
+    const quote = (value?.quotes || []).find(item => item.symbol === symbol) || value?.quotes?.[0] || {};
+    return { sector: normalizeSector(quote.sector || quote.sectorDisp || '') };
+  } catch {
+    return { sector: '' };
+  }
+}
+
+async function loadSectorContext(sector, config, cache) {
+  const normalized = normalizeSector(sector);
+  const etf = SECTOR_ETFS[normalized] || '';
+  if (!normalized || !etf) return { sector: normalized, etf, trend: '' };
+  if (!cache.has(etf)) {
+    cache.set(etf, loadSymbolMetrics(etf, config)
+      .then(metrics => metrics.close > metrics.sma50 ? 'Alcista ✅' : 'Bajista ⚠️')
+      .catch(() => ''));
+  }
+  return {
+    sector: normalized,
+    etf,
+    trend: await cache.get(etf)
+  };
+}
+
+function normalizeSector(sector) {
+  const value = String(sector || '').trim();
+  const map = {
+    'Financial Services': 'Financials',
+    'Consumer Cyclical': 'Consumer Discretionary',
+    'Consumer Defensive': 'Consumer Staples',
+    'Communication Services': 'Communication',
+    'Basic Materials': 'Materials'
+  };
+  return map[value] || value;
 }
 
 async function loadHistory(symbol, config) {
@@ -173,7 +250,11 @@ async function loadHistory(symbol, config) {
     Number.isFinite(c.volume)
   );
   if (candles.length < 30) throw new Error('historial insuficiente');
-  return candles;
+  const meta = result.meta || {};
+  return {
+    candles,
+    name: meta.longName || meta.shortName || meta.displayName || ''
+  };
 }
 
 async function mapLimit(items, limit, worker) {

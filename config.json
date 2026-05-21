@@ -3,7 +3,7 @@
     "port": 3100
   },
   "scan": {
-    "minScore": 75,
+    "minScore": 80,
     "maxResultsPerSide": 5,
     "maxUniverseSize": 240,
     "historyRange": "1y",
@@ -27,6 +27,7 @@
   "cacheTtlSeconds": {
     "chart": 300,
     "quote": 60,
+    "profile": 86400,
     "movers": 180
   },
   "alerts": {

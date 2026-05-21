@@ -76,13 +76,15 @@ function formatTelegramMessage(candidates) {
   const body = candidates.map(c => [
     `\n<b>${c.bias} Candidate</b>`,
     `Ticker: <b>${escapeHtml(c.ticker)}</b>`,
+    c.name ? `Name: ${escapeHtml(c.name)}` : null,
+    c.sector && c.sectorEtf && c.sectorTrend ? `Sector: ${escapeHtml(c.sector)} | ${escapeHtml(c.sectorEtf)}: ${escapeHtml(c.sectorTrend)}` : null,
     `Score: <b>${c.score}</b>`,
     `Setup: ${escapeHtml(c.setup)}`,
     `RVOL: ${escapeHtml(String(c.metrics?.rvol ?? 'n/a'))}`,
     `R:R: ${escapeHtml(String(c.riskReward ?? 'n/a'))}`,
     `Reason: ${escapeHtml(c.whyItMatters || '')}`,
     `Risk: ${escapeHtml(c.risk || '')}`
-  ].join('\n')).join('\n');
+  ].filter(Boolean).join('\n')).join('\n');
   return `${header}${body}\n\nNo constituye recomendacion financiera.`;
 }
 

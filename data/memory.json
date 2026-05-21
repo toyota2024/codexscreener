@@ -1,14 +1,111 @@
 {
   "watchlist": [],
-  "lastAlerts": {},
+  "lastAlerts": {
+    "D:LONG": {
+      "score": 80,
+      "bias": "LONG",
+      "setup": "Breakout after consolidation",
+      "timestamp": 1779177301683
+    },
+    "TE:LONG": {
+      "score": 80,
+      "bias": "LONG",
+      "setup": "Breakout after consolidation",
+      "timestamp": 1779177301683
+    },
+    "YPF:LONG": {
+      "score": 75,
+      "bias": "LONG",
+      "setup": "Breakout after consolidation",
+      "timestamp": 1779177301683
+    },
+    "RDW:LONG": {
+      "score": 75,
+      "bias": "LONG",
+      "setup": "Trend continuation pullback",
+      "timestamp": 1779177301683
+    },
+    "LI:SHORT": {
+      "score": 77,
+      "bias": "SHORT",
+      "setup": "Breakdown with weakness",
+      "timestamp": 1779177301683
+    },
+    "CTSH:SHORT": {
+      "score": 75,
+      "bias": "SHORT",
+      "setup": "Bearish continuation setup",
+      "timestamp": 1779177301683
+    },
+    "IMVT:LONG": {
+      "score": 90,
+      "bias": "LONG",
+      "setup": "Breakout after consolidation",
+      "timestamp": 1779344011685
+    },
+    "GS:LONG": {
+      "score": 92,
+      "bias": "LONG",
+      "setup": "Breakout after consolidation",
+      "timestamp": 1779344011685
+    },
+    "ROIV:LONG": {
+      "score": 90,
+      "bias": "LONG",
+      "setup": "Breakout after consolidation",
+      "timestamp": 1779344011685
+    },
+    "RXO:LONG": {
+      "score": 90,
+      "bias": "LONG",
+      "setup": "Breakout after consolidation",
+      "timestamp": 1779344011685
+    },
+    "WMT:LONG": {
+      "score": 85,
+      "bias": "LONG",
+      "setup": "Compression preparing expansion",
+      "timestamp": 1779344011685
+    },
+    "ICE:SHORT": {
+      "score": 84,
+      "bias": "SHORT",
+      "setup": "Breakdown with weakness",
+      "timestamp": 1779344011685
+    },
+    "GDS:SHORT": {
+      "score": 82,
+      "bias": "SHORT",
+      "setup": "Breakdown with weakness",
+      "timestamp": 1779344011685
+    },
+    "BILI:SHORT": {
+      "score": 82,
+      "bias": "SHORT",
+      "setup": "Bearish continuation setup",
+      "timestamp": 1779344011685
+    },
+    "ELF:SHORT": {
+      "score": 82,
+      "bias": "SHORT",
+      "setup": "Breakdown with weakness",
+      "timestamp": 1779344011685
+    }
+  },
   "lastScan": {
-    "timestamp": "2026-05-18T04:44:28.423Z",
+    "timestamp": "2026-05-21T06:13:14.014Z",
     "long": [
-      "SEDG",
-      "ONDS"
+      "GS",
+      "IMVT",
+      "ROIV",
+      "RXO",
+      "WMT"
     ],
     "short": [
-      "DLO"
+      "ICE",
+      "GDS",
+      "BILI",
+      "ELF"
     ]
   }
 }
