@@ -99,6 +99,8 @@
     .candidate.long { border-left: 4px solid var(--green); }
     .candidate.short { border-left: 4px solid var(--red); }
     .candidate.monitor { background: #15130c; border-color: #4a3b18; }
+    .candidate.long.priority-band { background: rgba(36, 193, 122, 0.08); }
+    .candidate.short.priority-band { background: rgba(239, 85, 85, 0.08); }
     .candidate-main { display: flex; gap: 12px; align-items: flex-start; }
     .ticker-block { min-width: 96px; max-width: 150px; }
     .ticker {
@@ -145,6 +147,7 @@
     .detail { border: 1px solid #1f2430; border-radius: 6px; padding: 7px; min-height: 52px; }
     .detail span { display: block; color: var(--muted); font-size: 10px; margin-bottom: 4px; }
     .breakdown { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+    .core-line { margin-top: 8px; font-size: 12px; color: #cbd5e1; }
     .bar { height: 7px; background: #20242e; border-radius: 999px; overflow: hidden; margin-top: 8px; }
     .bar > div { height: 100%; background: var(--amber); }
     .log {
@@ -368,12 +371,13 @@
     function renderCandidate(c) {
       const sideClass = c.bias === 'LONG' ? 'long' : 'short';
       const monitorClass = state.tab === 'monitor' ? ' monitor' : '';
+      const priorityClass = c.score >= 85 && c.score <= 90 ? 'priority-band' : '';
       const scoreClass = c.score >= 85 ? 'good' : 'mid';
       const b = c.scoreBreakdown || {};
       const m = c.metrics || {};
       const scoreWidth = Math.max(4, Math.min(100, c.score));
       return `
-        <article class="candidate ${sideClass}${monitorClass}">
+        <article class="candidate ${sideClass}${monitorClass} ${priorityClass}">
           <div class="candidate-main">
             <div class="ticker-block">
               <button class="ticker" type="button" data-copy-ticker="${escapeHtml(c.ticker)}" title="Copy ${escapeHtml(c.ticker)}">${escapeHtml(c.ticker)}</button>
@@ -385,6 +389,7 @@
               <div><strong>${escapeHtml(c.whyItMatters)}</strong></div>
               <div class="muted tiny" style="margin-top:5px">${escapeHtml(c.risk)}</div>
               <div class="bar"><div style="width:${scoreWidth}%"></div></div>
+              <div class="core-line">${c.coreSatellite?.type === 'CORE' ? 'CORE' : 'SATELLITE'} - ${escapeHtml(c.coreSatellite?.reason || 'perfil no clasificado')}</div>
             </div>
             <div class="score ${scoreClass}">${c.score}</div>
           </div>
@@ -407,6 +412,7 @@
             <span class="tag">Momentum ${b.momentum ?? 0}/20</span>
             <span class="tag">Structure ${b.structure ?? 0}/20</span>
             <span class="tag">R:R ${b.riskReward ?? 0}/10</span>
+            <span class="tag">EMA20 penalty -${b.emaDistancePenalty ?? 0}</span>
             <button class="btn" data-watch="${escapeHtml(c.ticker)}" style="margin-left:auto">Watch</button>
           </div>
         </article>

@@ -12,7 +12,8 @@ function buildSide(bias, symbol, m, market, config) {
   const momentum = scoreMomentum(bias, m, market);
   const structure = scoreStructure(bias, m);
   const riskReward = scoreRiskReward(bias, m, config);
-  const total = trend.points + volume.points + momentum.points + structure.points + riskReward.points;
+  const emaPenalty = scoreEmaDistancePenalty(m);
+  const total = trend.points + volume.points + momentum.points + structure.points + riskReward.points - emaPenalty.points;
   const compression = detectCompression(m);
   const setup = pickSetup(bias, structure, compression);
   const reasons = [
@@ -31,6 +32,7 @@ function buildSide(bias, symbol, m, market, config) {
     sectorTrend: m.sectorTrend || '',
     bias,
     score: Math.round(clamp(total, 0, 100)),
+    coreSatellite: classifyCoreSatellite(m),
     setup,
     whyItMatters: reasons.join(' + ') || 'Setup en observacion',
     entryIdea: bias === 'LONG'
@@ -53,8 +55,11 @@ function buildSide(bias, symbol, m, market, config) {
       ema20: round(m.ema20),
       macdHistogram: round(m.macdHistogram, 3),
       atr14: round(m.atr14),
+      atrPct: round((m.atr14 / m.close) * 100, 2),
       avgVolume20: Math.round(m.avgVolume20 || 0),
       rvol: round(m.rvol, 2),
+      coreUniverse: Boolean(m.coreUniverse),
+      distEma20Pct: round(getDistEma20Pct(m), 2),
       returns5d: round(m.returns5d, 2),
       returns20d: round(m.returns20d, 2),
       rsVsSpy20d: round(m.rsVsSpy20d, 2),
@@ -66,9 +71,32 @@ function buildSide(bias, symbol, m, market, config) {
       volume: volume.points,
       momentum: momentum.points,
       structure: structure.points,
-      riskReward: riskReward.points
+      riskReward: riskReward.points,
+      emaDistancePenalty: emaPenalty.points
     }
   };
+}
+
+function scoreEmaDistancePenalty(m) {
+  const dist = Math.abs(getDistEma20Pct(m));
+  if (dist > 20) return { points: 20 };
+  if (dist > 15) return { points: 15 };
+  if (dist > 10) return { points: 10 };
+  if (dist > 5) return { points: 5 };
+  return { points: 0 };
+}
+
+function getDistEma20Pct(m) {
+  if (!Number.isFinite(m.close) || !Number.isFinite(m.ema20) || m.ema20 === 0) return 0;
+  return ((m.close - m.ema20) / m.ema20) * 100;
+}
+
+function classifyCoreSatellite(m) {
+  const atrPct = Number.isFinite(m.atr14) && m.close ? m.atr14 / m.close : 1;
+  if (m.coreUniverse && atrPct <= 0.04) {
+    return { type: 'CORE', label: 'CORE', reason: 'S&P/Nasdaq 100 proxy + ATR bajo' };
+  }
+  return { type: 'SATELLITE', label: 'SATELLITE', reason: m.coreUniverse ? 'ATR alto' : 'fuera del universo core' };
 }
 
 function scoreTrend(bias, m) {

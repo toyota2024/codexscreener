@@ -8,6 +8,7 @@ const { hardVeto } = require('./filters');
 const { scoreCandidate } = require('./scoreEngine');
 const { detectMarketRegime } = require('./marketRegime');
 const { getMarketSession } = require('../utils/marketHours');
+const { updateScanHistory } = require('./historyStore');
 
 const ROOT = path.join(__dirname, '..');
 const SECTOR_ETFS = {
@@ -34,12 +35,14 @@ async function runScan(config) {
   const spy20 = indexMetrics.spy?.returns20d || 0;
   const qqq20 = indexMetrics.qqq?.returns20d || 0;
   const sectorMetricCache = new Map();
+  const coreUniverse = loadCoreUniverse();
 
   const analyzed = [];
   await mapLimit(universe, config.scan.requestConcurrency, async symbol => {
     try {
       const metrics = await loadSymbolMetrics(symbol, config);
       metrics.symbol = symbol;
+      metrics.coreUniverse = coreUniverse.has(symbol);
       metrics.rsVsSpy20d = (metrics.returns20d || 0) - spy20;
       metrics.rsVsQqq20d = (metrics.returns20d || 0) - qqq20;
       const veto = hardVeto(symbol, metrics, config);
@@ -74,14 +77,14 @@ async function runScan(config) {
     .map(item => item.long)
     .filter(Boolean)
     .filter(isPrimary)
-    .sort((a, b) => b.score - a.score)
+    .sort(preferredScoreSort)
     .slice(0, config.scan.maxResultsPerSide);
 
   const shorts = analyzed
     .map(item => item.short)
     .filter(Boolean)
     .filter(isPrimary)
-    .sort((a, b) => b.score - a.score)
+    .sort(preferredScoreSort)
     .slice(0, config.scan.maxResultsPerSide);
 
   const primaryKeys = new Set([...longs, ...shorts].map(item => `${item.ticker}:${item.bias}`));
@@ -94,7 +97,7 @@ async function runScan(config) {
   const nearMisses = analyzed
     .flatMap(item => [item.long, item.short].filter(Boolean))
     .filter(item => item.score < config.scan.minScore)
-    .sort((a, b) => b.score - a.score)
+    .sort(preferredScoreSort)
     .slice(0, 8);
 
   const result = {
@@ -110,10 +113,18 @@ async function runScan(config) {
     shortCandidates: shorts,
     monitoringCandidates,
     nearMisses,
+    validationPrices: analyzed
+      .filter(item => item.price)
+      .map(item => ({ ticker: item.ticker, price: item.price })),
     errors: errors.slice(0, 20),
     disclaimer: 'Este screener genera candidatos para analisis manual y educativo. No constituye recomendacion financiera.'
   };
 
+  const history = updateScanHistory(result, config);
+  result.history = {
+    records: history.records.length,
+    updatedAt: history.updatedAt
+  };
   writeJson(path.join(ROOT, 'data', 'last-scan.json'), result);
   log('info', 'Scan completed', {
     longs: longs.length,
@@ -123,6 +134,20 @@ async function runScan(config) {
     elapsedMs: result.elapsedMs
   });
   return result;
+}
+
+function loadCoreUniverse() {
+  return new Set([
+    ...readLines(path.join(ROOT, 'universes', 'nasdaq100.txt')),
+    ...readLines(path.join(ROOT, 'universes', 'sp500.txt'))
+  ]);
+}
+
+function preferredScoreSort(a, b) {
+  const aBand = a.score >= 85 && a.score <= 90 ? 1 : 0;
+  const bBand = b.score >= 85 && b.score <= 90 ? 1 : 0;
+  if (aBand !== bBand) return bBand - aBand;
+  return b.score - a.score;
 }
 
 async function buildUniverse(config, errors) {
@@ -233,14 +258,12 @@ async function loadHistory(symbol, config) {
   );
   const result = value?.chart?.result?.[0];
   const quote = result?.indicators?.quote?.[0];
+  const adjClose = result?.indicators?.adjclose?.[0]?.adjclose || [];
   const timestamps = result?.timestamp || [];
   if (!result || !quote || !timestamps.length) throw new Error('Yahoo chart sin datos');
   const candles = timestamps.map((ts, i) => ({
     date: new Date(ts * 1000).toISOString().slice(0, 10),
-    open: quote.open?.[i],
-    high: quote.high?.[i],
-    low: quote.low?.[i],
-    close: quote.close?.[i],
+    ...adjustedOhlc(quote, adjClose, i),
     volume: quote.volume?.[i]
   })).filter(c =>
     Number.isFinite(c.open) &&
@@ -254,6 +277,20 @@ async function loadHistory(symbol, config) {
   return {
     candles,
     name: meta.longName || meta.shortName || meta.displayName || ''
+  };
+}
+
+function adjustedOhlc(quote, adjClose, i) {
+  const close = quote.close?.[i];
+  const adjustedClose = adjClose?.[i];
+  const ratio = Number.isFinite(close) && close !== 0 && Number.isFinite(adjustedClose)
+    ? adjustedClose / close
+    : 1;
+  return {
+    open: quote.open?.[i] * ratio,
+    high: quote.high?.[i] * ratio,
+    low: quote.low?.[i] * ratio,
+    close: Number.isFinite(adjustedClose) ? adjustedClose : close
   };
 }
 

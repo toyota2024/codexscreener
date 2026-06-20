@@ -10,6 +10,11 @@
     "historyInterval": "1d",
     "requestConcurrency": 6
   },
+  "history": {
+    "dedupeWindowMinutes": 60,
+    "neutralBandPct": 2,
+    "validationWindowsDays": [5, 15, 30]
+  },
   "filters": {
     "minPrice": 5,
     "minAvgVolume20": 800000,

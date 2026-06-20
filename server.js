@@ -149,6 +149,10 @@ async function handle(req, res) {
       return sendJson(res, 200, readJson(MEMORY_PATH, { watchlist: [], lastAlerts: {}, lastScan: null }));
     }
 
+    if (url.pathname === '/api/history') {
+      return sendJson(res, 200, readJson(path.join(ROOT, 'data', 'scan-history.json'), { records: [] }));
+    }
+
     if (url.pathname === '/api/watchlist' && req.method === 'POST') {
       const body = await readBody(req);
       const symbol = String(body.symbol || '').trim().toUpperCase();
