@@ -13,16 +13,17 @@ function updateScanHistory(scanResult, config) {
   const validationWindows = config.history?.validationWindowsDays || [5, 15, 30];
   const neutralBand = config.history?.neutralBandPct || 2;
   const candidates = [
-    ...(scanResult.longCandidates || []),
-    ...(scanResult.shortCandidates || [])
+    ...(scanResult.longCandidates || []).map(candidate => ({ candidate, historyType: 'LONG' })),
+    ...(scanResult.shortCandidates || []).map(candidate => ({ candidate, historyType: 'SHORT' })),
+    ...(scanResult.monitoringCandidates || []).map(candidate => ({ candidate, historyType: 'MONITOR' }))
   ];
 
   const candidateKeys = [];
-  for (const candidate of candidates) {
+  for (const { candidate, historyType } of candidates) {
     const key = makeRecordKey(candidate, scanTs, windowMs);
     candidateKeys.push(key);
     const existing = records.find(record => record.key === key);
-    const payload = buildRecord(candidate, scanResult, key, validationWindows);
+    const payload = buildRecord(candidate, scanResult, key, validationWindows, historyType);
     if (existing) {
       const timestamp = existing.timestamp;
       const validations = existing.validations || payload.validations;
@@ -71,7 +72,7 @@ function makeRecordKey(candidate, scanTs, windowMs) {
   return `${candidate.ticker}:${candidate.bias}:${bucket}`;
 }
 
-function buildRecord(candidate, scanResult, key, validationWindows) {
+function buildRecord(candidate, scanResult, key, validationWindows, historyType) {
   const spy = scanResult.market?.spy || {};
   const validations = {};
   for (const days of validationWindows) {
@@ -85,6 +86,7 @@ function buildRecord(candidate, scanResult, key, validationWindows) {
     ticker: candidate.ticker,
     name: candidate.name || '',
     bias: candidate.bias,
+    historyType,
     score: candidate.score,
     riskReward: candidate.riskReward ?? null,
     setup: candidate.setup,
@@ -99,6 +101,47 @@ function buildRecord(candidate, scanResult, key, validationWindows) {
     distEma20Pct: candidate.metrics?.distEma20Pct ?? null,
     validations
   };
+}
+
+function readWinRateSummary(neutralBand = 2) {
+  const history = readJson(HISTORY_PATH, { records: [] });
+  const records = Array.isArray(history.records) ? history.records : [];
+  return calculateWinRate(records, neutralBand);
+}
+
+function calculateWinRate(records, neutralBand = 2) {
+  const types = ['LONG', 'SHORT', 'MONITOR'];
+  const windows = ['5D', '15D', '30D'];
+  const summary = Object.fromEntries(types.map(type => [
+    type,
+    Object.fromEntries(windows.map(window => [window, { wins: 0, losses: 0, total: 0, winRate: null }]))
+  ]));
+
+  for (const record of records) {
+    const type = types.includes(record.historyType) ? record.historyType : record.bias;
+    if (!summary[type]) continue;
+    for (const window of windows) {
+      const validation = record.validations?.[window];
+      if (!validation) continue;
+      let result = validation.candidateReturnPct;
+      if (!Number.isFinite(result) && Number.isFinite(validation.directionalReturnPct)) {
+        result = record.bias === 'SHORT' ? -validation.directionalReturnPct : validation.directionalReturnPct;
+      }
+      if (!Number.isFinite(result) || Math.abs(result) <= neutralBand) continue;
+      const win = record.bias === 'SHORT' ? result < -neutralBand : result > neutralBand;
+      if (win) summary[type][window].wins++;
+      else summary[type][window].losses++;
+    }
+  }
+
+  for (const type of types) {
+    for (const window of windows) {
+      const cell = summary[type][window];
+      cell.total = cell.wins + cell.losses;
+      cell.winRate = cell.total ? round((cell.wins / cell.total) * 100, 1) : null;
+    }
+  }
+  return summary;
 }
 
 function readHistoryEntries() {
@@ -194,4 +237,4 @@ function getSpyWeeklyState(value) {
   return 'FLAT';
 }
 
-module.exports = { updateScanHistory, readHistoryEntries };
+module.exports = { updateScanHistory, readHistoryEntries, readWinRateSummary, calculateWinRate };

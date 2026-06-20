@@ -5,7 +5,7 @@ const { httpsJson } = require('./utils/http');
 const { readJson, writeJson, round } = require('./utils/helpers');
 const { log } = require('./utils/logger');
 const { runScan } = require('./scanners/scanEngine');
-const { readHistoryEntries } = require('./scanners/historyStore');
+const { readHistoryEntries, readWinRateSummary } = require('./scanners/historyStore');
 const { sendCandidates, getTelegramConfig } = require('./telegram/telegramBot');
 
 const ROOT = __dirname;
@@ -152,6 +152,10 @@ async function handle(req, res) {
 
     if (url.pathname === '/api/history') {
       return sendJson(res, 200, readHistoryEntries());
+    }
+
+    if (url.pathname === '/api/history/summary') {
+      return sendJson(res, 200, readWinRateSummary(config.history?.neutralBandPct || 2));
     }
 
     if (url.pathname === '/api/watchlist' && req.method === 'POST') {

@@ -180,6 +180,13 @@
     .res-neg { color: var(--red); font-weight: 700; }
     .res-null { color: #4b5563; }
     .history-actions { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+    .win-rate-wrap { margin-bottom: 14px; overflow-x: auto; }
+    .win-rate-title { margin: 0 0 8px; font-size: 13px; }
+    .win-rate-table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); font-size: 12px; }
+    .win-rate-table th, .win-rate-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: center; }
+    .win-rate-table th { color: var(--muted); background: var(--panel-2); font-size: 10px; text-transform: uppercase; }
+    .win-rate-table th:first-child, .win-rate-table td:first-child { text-align: left; }
+    .win-rate-table tr:last-child td { border-bottom: none; }
     @media (max-width: 850px) {
       .grid, .metrics, .detail-grid { grid-template-columns: 1fr; }
       .candidate-main { flex-wrap: wrap; }
@@ -257,7 +264,8 @@
       result: null,
       tab: 'long',
       running: false,
-      history: []
+      history: [],
+      historySummary: null
     };
 
     const $ = (id) => document.getElementById(id);
@@ -289,7 +297,10 @@
       $('telegramState').textContent = state.config.telegramConfigured ? 'Telegram: ready' : 'Telegram: not configured';
       renderWatchlist();
       bindEvents();
-      state.history = await api('/api/history').catch(() => []);
+      [state.history, state.historySummary] = await Promise.all([
+        api('/api/history').catch(() => []),
+        api('/api/history/summary').catch(() => null)
+      ]);
       api('/api/update-results').catch(() => {});
       logLine('Ready. Press Scan Market.');
     }
@@ -329,7 +340,10 @@
         $('sendBtn').disabled = !topCandidates().length || !state.config.telegramConfigured;
         logLine(`Scan complete: ${state.result.longCandidates.length} long, ${state.result.shortCandidates.length} short, ${(state.result.monitoringCandidates || []).length} monitoreo.`);
         if (state.result.errorCount) logLine(`Partial errors: ${state.result.errorCount}.`);
-        state.history = await api('/api/history').catch(() => state.history);
+        [state.history, state.historySummary] = await Promise.all([
+          api('/api/history').catch(() => state.history),
+          api('/api/history/summary').catch(() => state.historySummary)
+        ]);
         renderCandidates();
       } catch (error) {
         $('statusDot').className = 'status-dot';
@@ -498,12 +512,13 @@
     }
 
     function renderHistory(container) {
+      const summaryHtml = renderWinRateSummary();
       if (!state.history || !state.history.length) {
-        container.innerHTML = '<span class="muted">No hay historial. Ejecuta un scan para comenzar el seguimiento.</span>';
+        container.innerHTML = summaryHtml + '<span class="muted">No hay historial. Ejecuta un scan para comenzar el seguimiento.</span>';
         return;
       }
       const entries = [...state.history].reverse();
-      let html = '<div class="history-actions"><button id="updateResultsBtn" class="btn primary">Actualizar Resultados</button><span class="muted tiny">Auto-actualiza al abrir el screener</span></div>';
+      let html = summaryHtml + '<div class="history-actions"><button id="updateResultsBtn" class="btn primary">Actualizar Resultados</button><span class="muted tiny">Auto-actualiza al abrir el screener</span></div>';
       for (const entry of entries) {
         const biasClass = (entry.mercado || '').toLowerCase();
         const fecha = new Date(entry.fecha).toLocaleString();
@@ -537,13 +552,32 @@
           try {
             const res = await api('/api/update-results');
             logLine(`Actualizados ${res.updated} resultados.`);
-            state.history = await api('/api/history');
+            [state.history, state.historySummary] = await Promise.all([
+              api('/api/history'),
+              api('/api/history/summary')
+            ]);
             renderCandidates();
           } catch (e) {
             logLine(`Error actualizando: ${e.message}`);
           }
         });
       }
+    }
+
+    function renderWinRateSummary() {
+      const types = ['LONG', 'SHORT', 'MONITOR'];
+      const windows = ['5D', '15D', '30D'];
+      let html = '<div class="win-rate-wrap"><h3 class="win-rate-title">Win Rate</h3>';
+      html += '<table class="win-rate-table"><thead><tr><th>Tipo</th><th>5D</th><th>15D</th><th>30D</th></tr></thead><tbody>';
+      for (const type of types) {
+        html += `<tr><td><strong>${type}</strong></td>`;
+        for (const window of windows) {
+          const cell = state.historySummary?.[type]?.[window];
+          html += `<td>${cell?.total ? `${cell.wins}/${cell.total} (${fmt(cell.winRate, 1)}%)` : 'Sin datos'}</td>`;
+        }
+        html += '</tr>';
+      }
+      return html + '</tbody></table></div>';
     }
 
     function resClass(val) {
