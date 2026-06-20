@@ -112,12 +112,18 @@ function readWinRateSummary(neutralBand = 2) {
 function calculateWinRate(records, neutralBand = 2) {
   const types = ['LONG', 'SHORT', 'MONITOR'];
   const windows = ['5D', '15D', '30D'];
+  const firstRecordByTicker = new Map();
+  const chronologicalRecords = [...records].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+  for (const record of chronologicalRecords) {
+    const ticker = String(record.ticker || '').trim().toUpperCase();
+    if (ticker && !firstRecordByTicker.has(ticker)) firstRecordByTicker.set(ticker, record);
+  }
   const summary = Object.fromEntries(types.map(type => [
     type,
     Object.fromEntries(windows.map(window => [window, { wins: 0, losses: 0, total: 0, winRate: null }]))
   ]));
 
-  for (const record of records) {
+  for (const record of firstRecordByTicker.values()) {
     const type = types.includes(record.historyType) ? record.historyType : record.bias;
     if (!summary[type]) continue;
     for (const window of windows) {
