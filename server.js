@@ -5,6 +5,7 @@ const { httpsJson } = require('./utils/http');
 const { readJson, writeJson, round } = require('./utils/helpers');
 const { log } = require('./utils/logger');
 const { runScan } = require('./scanners/scanEngine');
+const { readHistoryEntries } = require('./scanners/historyStore');
 const { sendCandidates, getTelegramConfig } = require('./telegram/telegramBot');
 
 const ROOT = __dirname;
@@ -150,7 +151,7 @@ async function handle(req, res) {
     }
 
     if (url.pathname === '/api/history') {
-      return sendJson(res, 200, readJson(path.join(ROOT, 'data', 'scan-history.json'), { records: [] }));
+      return sendJson(res, 200, readHistoryEntries());
     }
 
     if (url.pathname === '/api/watchlist' && req.method === 'POST') {
@@ -175,7 +176,6 @@ async function handle(req, res) {
         short: result.shortCandidates.map(c => c.ticker)
       };
       writeJson(MEMORY_PATH, memory);
-      saveHistoryEntry(result);
       return sendJson(res, 200, result);
     }
 
@@ -185,10 +185,6 @@ async function handle(req, res) {
       if (!candidates.length) return sendJson(res, 400, { error: 'No candidates provided' });
       const result = await sendCandidates(candidates, config, Boolean(body.force));
       return sendJson(res, 200, result);
-    }
-
-    if (url.pathname === '/api/history') {
-      return sendJson(res, 200, readHistory());
     }
 
     if (url.pathname === '/api/update-results') {

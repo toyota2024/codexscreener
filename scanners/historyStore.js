@@ -7,6 +7,7 @@ const HISTORY_PATH = path.join(ROOT, 'data', 'scan-history.json');
 function updateScanHistory(scanResult, config) {
   const history = readJson(HISTORY_PATH, { records: [] });
   const records = Array.isArray(history.records) ? history.records : [];
+  const scans = Array.isArray(history.scans) ? history.scans : [];
   const scanTs = Date.parse(scanResult.timestamp);
   const windowMs = (config.history?.dedupeWindowMinutes || 60) * 60 * 1000;
   const validationWindows = config.history?.validationWindowsDays || [5, 15, 30];
@@ -16,8 +17,10 @@ function updateScanHistory(scanResult, config) {
     ...(scanResult.shortCandidates || [])
   ];
 
+  const candidateKeys = [];
   for (const candidate of candidates) {
     const key = makeRecordKey(candidate, scanTs, windowMs);
+    candidateKeys.push(key);
     const existing = records.find(record => record.key === key);
     const payload = buildRecord(candidate, scanResult, key, validationWindows);
     if (existing) {
@@ -29,10 +32,29 @@ function updateScanHistory(scanResult, config) {
     }
   }
 
+  const scanKey = String(Math.floor(scanTs / windowMs) * windowMs);
+  const existingScan = scans.find(scan => scan.key === scanKey);
+  const scanPayload = {
+    key: scanKey,
+    timestamp: scanResult.timestamp,
+    marketBias: scanResult.market?.bias || 'NEUTRAL',
+    candidateKeys
+  };
+  if (existingScan) {
+    existingScan.timestamp = scanResult.timestamp;
+    existingScan.marketBias = scanPayload.marketBias;
+    existingScan.candidateKeys = [...new Set([...(existingScan.candidateKeys || []), ...candidateKeys])];
+  } else {
+    scans.push(scanPayload);
+  }
+
   validateRecords(records, scanResult, validationWindows, neutralBand);
   history.records = records
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
     .slice(0, 1000);
+  history.scans = scans
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, 250);
   history.updatedAt = scanResult.timestamp;
   writeJson(HISTORY_PATH, history);
   return history;
@@ -55,8 +77,10 @@ function buildRecord(candidate, scanResult, key, validationWindows) {
     lastSeenAt: scanResult.timestamp,
     seenCount: 1,
     ticker: candidate.ticker,
+    name: candidate.name || '',
     bias: candidate.bias,
     score: candidate.score,
+    riskReward: candidate.riskReward ?? null,
     setup: candidate.setup,
     entryPrice: candidate.metrics?.price || null,
     spyPriceAtScan: spy.price || null,
@@ -66,6 +90,61 @@ function buildRecord(candidate, scanResult, key, validationWindows) {
     coreSatellite: candidate.coreSatellite || null,
     distEma20Pct: candidate.metrics?.distEma20Pct ?? null,
     validations
+  };
+}
+
+function readHistoryEntries() {
+  const history = readJson(HISTORY_PATH, { records: [], scans: [] });
+  const records = Array.isArray(history.records) ? history.records : [];
+  const byKey = new Map(records.map(record => [record.key, record]));
+  let scans = Array.isArray(history.scans) ? history.scans : [];
+
+  // Older files did not have scan metadata. Recover entries from record buckets.
+  if (!scans.length && records.length) {
+    const recovered = new Map();
+    for (const record of records) {
+      const key = String(record.key || '').split(':').pop() || record.timestamp;
+      const scan = recovered.get(key) || {
+        key,
+        timestamp: record.timestamp,
+        marketBias: record.marketBiasAtScan || 'NEUTRAL',
+        candidateKeys: []
+      };
+      scan.candidateKeys.push(record.key);
+      if (Date.parse(record.lastSeenAt || record.timestamp) > Date.parse(scan.timestamp)) {
+        scan.timestamp = record.lastSeenAt || record.timestamp;
+      }
+      recovered.set(key, scan);
+    }
+    scans = [...recovered.values()];
+  }
+
+  return scans
+    .map(scan => ({
+      id: scan.key,
+      fecha: scan.timestamp,
+      mercado: scan.marketBias || 'NEUTRAL',
+      candidatos: (scan.candidateKeys || [])
+        .map(key => byKey.get(key))
+        .filter(Boolean)
+        .map(toUiCandidate)
+    }))
+    .sort((a, b) => Date.parse(a.fecha) - Date.parse(b.fecha));
+}
+
+function toUiCandidate(record) {
+  const result = days => record.validations?.[`${days}D`]?.directionalReturnPct ?? null;
+  return {
+    ticker: record.ticker,
+    nombre: record.name || '',
+    bias: record.bias,
+    score: record.score,
+    rr: record.riskReward ?? null,
+    entrada: record.entryPrice,
+    setup: record.setup || '',
+    resultado_5d: result(5),
+    resultado_15d: result(15),
+    resultado_30d: result(30)
   };
 }
 
@@ -107,4 +186,4 @@ function getSpyWeeklyState(value) {
   return 'FLAT';
 }
 
-module.exports = { updateScanHistory };
+module.exports = { updateScanHistory, readHistoryEntries };
