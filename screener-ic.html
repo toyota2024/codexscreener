@@ -516,7 +516,7 @@
             html += `<td><strong>${escapeHtml(c.ticker)}</strong><br><span class="muted tiny">${escapeHtml(c.nombre || '')}</span></td>`;
             html += `<td><span class="tag ${c.bias === 'LONG' ? 'long' : 'short'}">${escapeHtml(c.bias)}</span></td>`;
             html += `<td>${c.score}</td>`;
-            html += `<td>${fmt(c.rr, 2)}</td>`;
+            html += `<td>${fmt(c.riskReward, 2)}</td>`;
             html += `<td>$${fmt(c.entrada, 2)}</td>`;
             html += `<td class="${resClass(c.resultado_5d)}">${resText(c.resultado_5d)}</td>`;
             html += `<td class="${resClass(c.resultado_15d)}">${resText(c.resultado_15d)}</td>`;

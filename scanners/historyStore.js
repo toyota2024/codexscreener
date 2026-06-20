@@ -24,9 +24,15 @@ function updateScanHistory(scanResult, config) {
     const existing = records.find(record => record.key === key);
     const payload = buildRecord(candidate, scanResult, key, validationWindows);
     if (existing) {
-      if (candidate.score > existing.score) Object.assign(existing, payload);
-      existing.seenCount = (existing.seenCount || 1) + 1;
-      existing.lastSeenAt = scanResult.timestamp;
+      const timestamp = existing.timestamp;
+      const validations = existing.validations || payload.validations;
+      const seenCount = (existing.seenCount || 1) + 1;
+      Object.assign(existing, payload, {
+        timestamp,
+        validations,
+        seenCount,
+        lastSeenAt: scanResult.timestamp
+      });
     } else {
       records.push(payload);
     }
@@ -43,7 +49,7 @@ function updateScanHistory(scanResult, config) {
   if (existingScan) {
     existingScan.timestamp = scanResult.timestamp;
     existingScan.marketBias = scanPayload.marketBias;
-    existingScan.candidateKeys = [...new Set([...(existingScan.candidateKeys || []), ...candidateKeys])];
+    existingScan.candidateKeys = candidateKeys;
   } else {
     scans.push(scanPayload);
   }
@@ -82,7 +88,9 @@ function buildRecord(candidate, scanResult, key, validationWindows) {
     score: candidate.score,
     riskReward: candidate.riskReward ?? null,
     setup: candidate.setup,
-    entryPrice: candidate.metrics?.price || null,
+    entryPrice: candidate.entryPrice ?? candidate.metrics?.price ?? null,
+    stopPrice: candidate.stopPrice ?? null,
+    targetPrice: candidate.targetPrice ?? null,
     spyPriceAtScan: spy.price || null,
     spyWeeklyReturnAtScan: spy.returns5d || null,
     spyWeeklyStateAtScan: getSpyWeeklyState(spy.returns5d),
@@ -139,7 +147,7 @@ function toUiCandidate(record) {
     nombre: record.name || '',
     bias: record.bias,
     score: record.score,
-    rr: record.riskReward ?? null,
+    riskReward: record.riskReward ?? null,
     entrada: record.entryPrice,
     setup: record.setup || '',
     resultado_5d: result(5),

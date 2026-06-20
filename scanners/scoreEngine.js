@@ -35,9 +35,12 @@ function buildSide(bias, symbol, m, market, config) {
     coreSatellite: classifyCoreSatellite(m),
     setup,
     whyItMatters: reasons.join(' + ') || 'Setup en observacion',
+    entryPrice: round(riskReward.entry),
+    stopPrice: round(riskReward.stop),
+    targetPrice: round(riskReward.target),
     entryIdea: bias === 'LONG'
-      ? `Sobre ${round(Math.max(m.close, m.high20Prev || m.close))}`
-      : `Bajo ${round(Math.min(m.close, m.low20Prev || m.close))}`,
+      ? `Sobre ${round(riskReward.entry)}`
+      : `Bajo ${round(riskReward.entry)}`,
     stopIdea: bias === 'LONG'
       ? `Debajo de ${round(riskReward.stop)}`
       : `Encima de ${round(riskReward.stop)}`,
@@ -164,7 +167,9 @@ function scoreStructure(bias, m) {
 }
 
 function scoreRiskReward(bias, m, config) {
-  const entry = m.close;
+  const entry = bias === 'LONG'
+    ? Math.max(m.close, m.high20Prev || m.close)
+    : Math.min(m.close, m.low20Prev || m.close);
   let stop;
   let target;
   if (bias === 'LONG') {
@@ -182,7 +187,7 @@ function scoreRiskReward(bias, m, config) {
   const risk = bias === 'LONG' ? entry - stop : stop - entry;
   const rr = risk > 0 ? reward / risk : 0;
   const points = rr >= config.filters.minRR ? 10 : rr >= 1.5 ? 5 : 0;
-  return { points, rr, stop, target, reasons: rr >= config.filters.minRR ? [`R:R ${round(rr, 1)}`] : [] };
+  return { points, rr, entry, stop, target, reasons: rr >= config.filters.minRR ? [`R:R ${round(rr, 1)}`] : [] };
 }
 
 function detectCompression(m) {

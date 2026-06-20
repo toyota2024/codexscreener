@@ -60,7 +60,7 @@ function saveHistoryEntry(result) {
       sector: c.sector || '',
       bias: c.bias,
       score: c.score,
-      rr: c.riskReward,
+      riskReward: c.riskReward,
       entrada: c.metrics?.price || null,
       stop: parseFloat(String(c.stopIdea || '').replace(/[^\d.-]/g, '')) || null,
       target: parseFloat(c.targetIdea) || null,
