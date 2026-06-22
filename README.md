@@ -17,6 +17,35 @@ npm start
 http://localhost:3100
 ```
 
+## Scan automatico
+
+El servidor ejecuta scans de lunes a viernes a las 7:30 AM y 1:00 PM en la zona `America/Denver`. El proceso Node debe permanecer abierto.
+
+Para habilitar el trigger de prueba, agrega una clave privada a `.env`:
+
+```env
+SCAN_TRIGGER_TOKEN=TU_CLAVE_SEGURA
+```
+
+Genera una clave hexadecimal de 256 bits en PowerShell:
+
+```powershell
+$bytes = New-Object byte[] 32
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($bytes)
+$rng.Dispose()
+($bytes | ForEach-Object { $_.ToString("x2") }) -join ""
+```
+
+Reinicia el servidor y fuerza un scan con envio Telegram:
+
+```powershell
+$token = "TU_CLAVE_SEGURA"
+Invoke-RestMethod -Method POST `
+  -Uri "http://localhost:3100/api/auto-scan/test" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
 ## Alcance V1
 
 - Datos gratuitos de Yahoo Finance.

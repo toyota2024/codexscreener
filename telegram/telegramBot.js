@@ -27,6 +27,24 @@ function getTelegramConfig() {
   };
 }
 
+function getScanTriggerToken() {
+  const env = loadEnv();
+  return process.env.SCAN_TRIGGER_TOKEN || env.SCAN_TRIGGER_TOKEN;
+}
+
+async function sendTelegramText(text) {
+  const tg = getTelegramConfig();
+  if (!tg.token || !tg.chatId) {
+    throw new Error('Faltan TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID en .env');
+  }
+  return httpsPostJson('api.telegram.org', `/bot${tg.token}/sendMessage`, {
+    chat_id: tg.chatId,
+    text,
+    parse_mode: 'HTML',
+    disable_web_page_preview: true
+  });
+}
+
 async function sendCandidates(candidates, config, force = false) {
   const tg = getTelegramConfig();
   if (!tg.token || !tg.chatId) {
@@ -39,12 +57,7 @@ async function sendCandidates(candidates, config, force = false) {
     return { sent: 0, skipped: candidates.length, message: 'Sin alertas nuevas por cooldown/score.' };
   }
   const text = formatTelegramMessage(selected);
-  const result = await httpsPostJson('api.telegram.org', `/bot${tg.token}/sendMessage`, {
-    chat_id: tg.chatId,
-    text,
-    parse_mode: 'HTML',
-    disable_web_page_preview: true
-  });
+  const result = await sendTelegramText(text);
   const now = Date.now();
   for (const c of selected) {
     memory.lastAlerts[`${c.ticker}:${c.bias}`] = {
@@ -56,6 +69,44 @@ async function sendCandidates(candidates, config, force = false) {
   }
   writeJson(MEMORY_PATH, memory);
   return { sent: selected.length, skipped: candidates.length - selected.length, telegram: result };
+}
+
+function formatGroupedScanMessage(scanResult, label) {
+  const groups = [
+    { icon: '\u{1F4C8}', title: 'LONG', items: scanResult.longCandidates || [] },
+    { icon: '\u{1F4C9}', title: 'SHORT', items: scanResult.shortCandidates || [] },
+    { icon: '\u{1F440}', title: 'MONITOR', items: scanResult.monitoringCandidates || [] }
+  ];
+  const lines = [
+    `\u{1F3AF} <b>SCREENER \u2014 ${escapeHtml(label)}</b>`,
+    `R\u00e9gimen: <b>${escapeHtml(scanResult.market?.bias || 'NEUTRAL')}</b>`
+  ];
+  for (const group of groups) {
+    lines.push('', `${group.icon} <b>${group.title}:</b>`);
+    if (!group.items.length) {
+      lines.push('Sin candidatos');
+      continue;
+    }
+    for (const candidate of group.items) lines.push(formatGroupedCandidate(candidate));
+  }
+  lines.push('', 'No constituye recomendaci\u00f3n financiera.');
+  return lines.join('\n');
+}
+
+function formatGroupedCandidate(candidate) {
+  const profile = candidate.coreSatellite?.type || 'SIN CLASIFICAR';
+  const entry = candidate.entryPrice ?? candidate.metrics?.price;
+  const price = Number.isFinite(Number(entry)) ? `$${Number(entry).toFixed(2)}` : 'n/a';
+  return `- <b>${escapeHtml(candidate.ticker)}</b> \u00b7 ${escapeHtml(candidate.score)} \u00b7 ${escapeHtml(profile)} \u00b7 ${price}`;
+}
+
+async function sendGroupedScan(scanResult, label) {
+  const text = formatGroupedScanMessage(scanResult, label);
+  const telegram = await sendTelegramText(text);
+  const sent = (scanResult.longCandidates?.length || 0)
+    + (scanResult.shortCandidates?.length || 0)
+    + (scanResult.monitoringCandidates?.length || 0);
+  return { sent, text, telegram };
 }
 
 function filterSendable(candidates, memory, config, force) {
@@ -95,4 +146,11 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;');
 }
 
-module.exports = { sendCandidates, getTelegramConfig };
+module.exports = {
+  sendCandidates,
+  sendGroupedScan,
+  sendTelegramText,
+  formatGroupedScanMessage,
+  getTelegramConfig,
+  getScanTriggerToken
+};

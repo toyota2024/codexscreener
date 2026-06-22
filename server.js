@@ -6,14 +6,23 @@ const { readJson, writeJson, round } = require('./utils/helpers');
 const { log } = require('./utils/logger');
 const { runScan } = require('./scanners/scanEngine');
 const { readHistoryEntries, readWinRateSummary } = require('./scanners/historyStore');
-const { sendCandidates, getTelegramConfig } = require('./telegram/telegramBot');
+const {
+  sendCandidates,
+  sendGroupedScan,
+  getTelegramConfig,
+  getScanTriggerToken
+} = require('./telegram/telegramBot');
+const { createAutoScanScheduler } = require('./scheduler/autoScanScheduler');
+const { authorizeBearer } = require('./utils/auth');
 
 const ROOT = __dirname;
 const CONFIG_PATH = path.join(ROOT, 'config.json');
 const MEMORY_PATH = path.join(ROOT, 'data', 'memory.json');
 const HISTORY_PATH = path.join(ROOT, 'data', 'history.json');
+const LAST_SCAN_PATH = path.join(ROOT, 'data', 'last-scan.json');
 const config = readJson(CONFIG_PATH, {});
 const PORT = Number(process.env.PORT || config.server?.port || 3100);
+let activeScan = null;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -129,6 +138,28 @@ function serveFile(res, filePath) {
   fs.createReadStream(filePath).pipe(res);
 }
 
+async function executeScan(options = {}) {
+  if (activeScan) return activeScan;
+  if (options.reuseAfter) {
+    const previous = readJson(LAST_SCAN_PATH, null);
+    if (previous?.timestamp && Date.parse(previous.timestamp) >= Date.parse(options.reuseAfter)) return previous;
+  }
+  activeScan = runScan(config)
+    .then(result => {
+      const memory = readJson(MEMORY_PATH, { watchlist: [], lastAlerts: {}, lastScan: null });
+      memory.lastScan = {
+        timestamp: result.timestamp,
+        long: result.longCandidates.map(candidate => candidate.ticker),
+        short: result.shortCandidates.map(candidate => candidate.ticker),
+        monitor: result.monitoringCandidates.map(candidate => candidate.ticker)
+      };
+      writeJson(MEMORY_PATH, memory);
+      return result;
+    })
+    .finally(() => { activeScan = null; });
+  return activeScan;
+}
+
 async function handle(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   if (req.method === 'OPTIONS') return sendJson(res, 200, { ok: true });
@@ -172,15 +203,25 @@ async function handle(req, res) {
     }
 
     if (url.pathname === '/api/scan') {
-      const result = await runScan(config);
-      const memory = readJson(MEMORY_PATH, { watchlist: [], lastAlerts: {}, lastScan: null });
-      memory.lastScan = {
-        timestamp: result.timestamp,
-        long: result.longCandidates.map(c => c.ticker),
-        short: result.shortCandidates.map(c => c.ticker)
-      };
-      writeJson(MEMORY_PATH, memory);
+      const result = await executeScan();
       return sendJson(res, 200, result);
+    }
+
+    if (url.pathname === '/api/auto-scan/test') {
+      if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed' });
+      const auth = authorizeBearer(req.headers.authorization, getScanTriggerToken());
+      if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+      const result = await executeScan();
+      const telegram = await sendGroupedScan(result, 'PRUEBA MANUAL');
+      return sendJson(res, 200, {
+        ok: true,
+        timestamp: result.timestamp,
+        regime: result.market?.bias || 'NEUTRAL',
+        long: result.longCandidates.length,
+        short: result.shortCandidates.length,
+        monitor: result.monitoringCandidates.length,
+        sent: telegram.sent
+      });
     }
 
     if (url.pathname === '/api/telegram/send' && req.method === 'POST') {
@@ -212,9 +253,11 @@ async function handle(req, res) {
   }
 }
 
-http.createServer(handle).listen(PORT, () => {
+const server = http.createServer(handle);
+server.listen(PORT, () => {
   console.log('');
   console.log('Infusion Capital Screener IC V1');
   console.log(`http://localhost:${PORT}`);
   console.log('');
+  createAutoScanScheduler({ config, executeScan }).start();
 });
