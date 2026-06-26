@@ -13,6 +13,12 @@ echo ""
 
 cd "$APP_DIR" || exit 1
 
+# Usa primero la copia local de Node.js incluida para Mac.
+LOCAL_NODE="$(find "$APP_DIR/.runtime" -path "*/bin/node" -type f -perm +111 2>/dev/null | head -n 1)"
+if [ -n "$LOCAL_NODE" ]; then
+  export PATH="$(dirname "$LOCAL_NODE"):$PATH"
+fi
+
 if ! command -v node >/dev/null 2>&1; then
   echo "Node.js no esta instalado."
   echo "Instala la version LTS desde: https://nodejs.org"

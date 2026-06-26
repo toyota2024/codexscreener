@@ -87,17 +87,14 @@ function formatGroupedScanMessage(scanResult, label) {
       lines.push('Sin candidatos');
       continue;
     }
-    for (const candidate of group.items) lines.push(formatGroupedCandidate(candidate));
+    for (const candidate of group.items) lines.push('', formatCandidateDetails(candidate));
   }
   lines.push('', 'No constituye recomendaci\u00f3n financiera.');
   return lines.join('\n');
 }
 
 function formatGroupedCandidate(candidate) {
-  const profile = candidate.coreSatellite?.type || 'SIN CLASIFICAR';
-  const entry = candidate.entryPrice ?? candidate.metrics?.price;
-  const price = Number.isFinite(Number(entry)) ? `$${Number(entry).toFixed(2)}` : 'n/a';
-  return `- <b>${escapeHtml(candidate.ticker)}</b> \u00b7 ${escapeHtml(candidate.score)} \u00b7 ${escapeHtml(profile)} \u00b7 ${price}`;
+  return formatCandidateDetails(candidate);
 }
 
 async function sendGroupedScan(scanResult, label) {
@@ -124,19 +121,38 @@ function filterSendable(candidates, memory, config, force) {
 
 function formatTelegramMessage(candidates) {
   const header = `🚨 <b>Infusion Capital Screener</b>\n${new Date().toLocaleString()}\n`;
-  const body = candidates.map(c => [
-    `\n<b>${c.bias} Candidate</b>`,
-    `Ticker: <b>${escapeHtml(c.ticker)}</b>`,
-    c.name ? `Name: ${escapeHtml(c.name)}` : null,
-    c.sector && c.sectorEtf && c.sectorTrend ? `Sector: ${escapeHtml(c.sector)} | ${escapeHtml(c.sectorEtf)}: ${escapeHtml(c.sectorTrend)}` : null,
-    `Score: <b>${c.score}</b>`,
-    `Setup: ${escapeHtml(c.setup)}`,
-    `RVOL: ${escapeHtml(String(c.metrics?.rvol ?? 'n/a'))}`,
-    `R:R: ${escapeHtml(String(c.riskReward ?? 'n/a'))}`,
-    `Reason: ${escapeHtml(c.whyItMatters || '')}`,
-    `Risk: ${escapeHtml(c.risk || '')}`
-  ].filter(Boolean).join('\n')).join('\n');
+  const body = candidates.map(formatCandidateDetails).join('\n\n');
   return `${header}${body}\n\nNo constituye recomendacion financiera.`;
+}
+
+function formatCandidateDetails(candidate) {
+  const isShort = candidate.bias === 'SHORT';
+  const icon = isShort ? '\u{1F4C9}' : '\u{1F4C8}';
+  const entrySide = isShort ? 'Bajo' : 'Sobre';
+  const compression = candidate.metrics?.compression === 'Compression' ? 'S\u00ed' : 'No';
+  return [
+    `${icon} <b>${escapeHtml(candidate.ticker)}</b> \u2014 <b>${escapeHtml(candidate.bias)}</b>`,
+    candidate.name ? `\u{1F3E2} ${escapeHtml(candidate.name)}` : null,
+    `\u{1F4CA} Score: <b>${escapeHtml(candidate.score)}</b> | R:R: <b>${formatNumber(candidate.riskReward, 2)}</b>`,
+    `\u{1F4CB} Setup: ${escapeHtml(candidate.setup || 'n/a')}`,
+    `\u{1F4B0} Entry: ${entrySide} ${formatMoney(candidate.entryPrice)}`,
+    `\u{1F6D1} Stop: ${formatMoney(candidate.stopPrice)}`,
+    `\u{1F3AF} Target: ${formatMoney(candidate.targetPrice)}`,
+    `\u{1F4C9} RSI: ${formatNumber(candidate.metrics?.rsi14, 1)} | Fuerza Relativa: ${escapeHtml(candidate.relativeStrength || 'n/a')}`,
+    `\u{1F56F}\uFE0F Compresi\u00f3n: ${compression}`
+  ].filter(Boolean).join('\n');
+}
+
+function formatMoney(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 'n/a';
+  return `$${number.toFixed(2)}`;
+}
+
+function formatNumber(value, digits = 2) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 'n/a';
+  return number.toFixed(digits);
 }
 
 function escapeHtml(value) {
@@ -151,6 +167,7 @@ module.exports = {
   sendGroupedScan,
   sendTelegramText,
   formatGroupedScanMessage,
+  formatTelegramMessage,
   getTelegramConfig,
   getScanTriggerToken
 };
