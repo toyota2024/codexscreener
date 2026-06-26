@@ -110,6 +110,7 @@ function enrichCandles(candles) {
   const s200 = sma(closes, 200);
   const e9 = ema(closes, 9);
   const e20 = ema(closes, 20);
+  const e50 = ema(closes, 50);
   const r14 = rsi(closes, 14);
   const m = macd(closes);
   const a = atr(candles, 14);
@@ -118,6 +119,9 @@ function enrichCandles(candles) {
   const i = candles.length - 1;
   return {
     candles,
+    open: candles[i].open,
+    high: candles[i].high,
+    low: candles[i].low,
     close: closes[i],
     volume: volumes[i],
     sma20: s20[i],
@@ -125,6 +129,7 @@ function enrichCandles(candles) {
     sma200: s200[i],
     ema9: e9[i],
     ema20: e20[i],
+    ema50: e50[i],
     rsi14: r14[i],
     macd: m.line[i],
     macdSignal: m.signal[i],
@@ -151,6 +156,7 @@ function enrichCandles(candles) {
       sma200: round(s200[i]),
       ema9: round(e9[i]),
       ema20: round(e20[i]),
+      ema50: round(e50[i]),
       rsi14: round(r14[i], 1),
       macd: round(m.line[i], 3),
       macdSignal: round(m.signal[i], 3),

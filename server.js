@@ -21,6 +21,7 @@ const MEMORY_PATH = path.join(ROOT, 'data', 'memory.json');
 const HISTORY_PATH = path.join(ROOT, 'data', 'history.json');
 const LAST_SCAN_PATH = path.join(ROOT, 'data', 'last-scan.json');
 const config = readJson(CONFIG_PATH, {});
+const HOST = process.env.HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT || config.server?.port || 3100);
 let activeScan = null;
 
@@ -254,7 +255,7 @@ async function handle(req, res) {
 }
 
 const server = http.createServer(handle);
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   console.log('');
   console.log('Infusion Capital Screener IC V1');
   console.log(`http://localhost:${PORT}`);

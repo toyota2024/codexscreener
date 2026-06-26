@@ -1,8 +1,8 @@
 const { clamp, round } = require('../utils/helpers');
 
-function scoreCandidate(symbol, metrics, market, config) {
-  const long = buildSide('LONG', symbol, metrics, market, config);
-  const short = buildSide('SHORT', symbol, metrics, market, config);
+function scoreCandidate(symbol, metrics, market, config, options = {}) {
+  const long = options.buscarLongs === false ? null : buildSide('LONG', symbol, metrics, market, config);
+  const short = options.buscarShorts === false ? null : buildSide('SHORT', symbol, metrics, market, config);
   return { long, short };
 }
 
@@ -17,7 +17,7 @@ function buildSide(bias, symbol, m, market, config) {
   const emaPenalty = scoreEmaDistancePenalty(m);
   const total = trend.points + volume.points + momentum.points + structure.points + riskReward.points - emaPenalty.points;
   const compression = detectCompression(m);
-  const setup = pickSetup(bias, structure, compression);
+  const setup = entryCheck.setup || pickSetup(bias, structure, compression);
   const reasons = [
     ...trend.reasons,
     ...volume.reasons,
@@ -59,6 +59,7 @@ function buildSide(bias, symbol, m, market, config) {
       sma200: round(m.sma200),
       ema9: round(m.ema9),
       ema20: round(m.ema20),
+      ema50: round(m.ema50),
       macdHistogram: round(m.macdHistogram, 3),
       atr14: round(m.atr14),
       atrPct: round((m.atr14 / m.close) * 100, 2),
@@ -194,10 +195,13 @@ function validatePullbackEntry(bias, m) {
     if (Number.isFinite(m.high20Prev) && m.close > m.high20Prev * 1.02) {
       return { passed: false, reason: 'LONG extendido > high20Prev +2%' };
     }
-    if (m.close < m.ema20 || m.close > m.ema9) {
-      return { passed: false, reason: 'LONG fuera del canal EMA20-EMA9' };
+    if (m.low <= m.ema9 && m.close >= m.ema9 * 0.995 && m.close > m.ema20) {
+      return { passed: true, entry: m.ema9 * 1.01 };
     }
-    return { passed: true, entry: m.ema9 };
+    if (qualifiesMajorPullback(m)) {
+      return { passed: true, entry: m.ema50 * 1.01, setup: 'PULLBACK_MAYOR' };
+    }
+    return { passed: false, reason: 'LONG fuera de trigger EMA9/EMA50' };
   }
   if (Number.isFinite(m.low20Prev) && m.close < m.low20Prev * 0.98) {
     return { passed: false, reason: 'SHORT extendido < low20Prev -2%' };
@@ -206,6 +210,28 @@ function validatePullbackEntry(bias, m) {
     return { passed: false, reason: 'SHORT fuera del canal EMA9-EMA20' };
   }
   return { passed: true, entry: m.ema9 };
+}
+
+function qualifiesMajorPullback(m) {
+  if (qualifiesLongMomentum(m)) return false;
+  if (!Number.isFinite(m.ema50) || !Number.isFinite(m.low) || !Number.isFinite(m.open) || !Number.isFinite(m.high)) {
+    return false;
+  }
+  const range = m.high - m.low;
+  const body = Math.abs(m.close - m.open);
+  return m.low <= m.ema50 &&
+    m.close > m.ema50 &&
+    m.close > m.open &&
+    range > 0 &&
+    body > range * 0.5 &&
+    m.close > m.sma200;
+}
+
+function qualifiesLongMomentum(m) {
+  return (m.rsi14 >= 50 && m.rsi14 <= 75) ||
+    (m.macdHistogram > 0 && m.macd > m.macdSignal) ||
+    ((m.returns5d || 0) > 0 && (m.returns20d || 0) > 0) ||
+    ((m.rsVsSpy20d || 0) > 0 || (m.rsVsQqq20d || 0) > 0);
 }
 
 function detectCompression(m) {

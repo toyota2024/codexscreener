@@ -31,7 +31,9 @@ async function runScan(config) {
   const session = getMarketSession();
   const universe = await buildUniverse(config, errors);
   const indexMetrics = await loadIndexMetrics(config, errors);
-  const market = detectMarketRegime(indexMetrics.spy, indexMetrics.qqq);
+  const market = await detectMarketRegime(indexMetrics.spy, indexMetrics.qqq);
+  const buscarLongs = !market.blockLong;
+  const buscarShorts = Boolean(market.shortAllowed);
   const spy20 = indexMetrics.spy?.returns20d || 0;
   const qqq20 = indexMetrics.qqq?.returns20d || 0;
   const sectorMetricCache = new Map();
@@ -55,7 +57,7 @@ async function runScan(config) {
       metrics.sector = sectorContext.sector;
       metrics.sectorEtf = sectorContext.etf;
       metrics.sectorTrend = sectorContext.trend;
-      const scored = scoreCandidate(symbol, metrics, market, config);
+      const scored = scoreCandidate(symbol, metrics, market, config, { buscarLongs, buscarShorts });
       analyzed.push({
         ticker: symbol,
         price: round(metrics.close),
