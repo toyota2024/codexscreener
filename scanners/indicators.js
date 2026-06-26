@@ -108,6 +108,7 @@ function enrichCandles(candles) {
   const s20 = sma(closes, 20);
   const s50 = sma(closes, 50);
   const s200 = sma(closes, 200);
+  const e9 = ema(closes, 9);
   const e20 = ema(closes, 20);
   const r14 = rsi(closes, 14);
   const m = macd(closes);
@@ -122,6 +123,7 @@ function enrichCandles(candles) {
     sma20: s20[i],
     sma50: s50[i],
     sma200: s200[i],
+    ema9: e9[i],
     ema20: e20[i],
     rsi14: r14[i],
     macd: m.line[i],
@@ -147,6 +149,7 @@ function enrichCandles(candles) {
       sma20: round(s20[i]),
       sma50: round(s50[i]),
       sma200: round(s200[i]),
+      ema9: round(e9[i]),
       ema20: round(e20[i]),
       rsi14: round(r14[i], 1),
       macd: round(m.line[i], 3),

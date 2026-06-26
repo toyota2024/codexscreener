@@ -43,7 +43,7 @@ El scheduler se ejecuta dentro del proceso Node:
 
 | Día | Hora (`America/Denver`) | Etiqueta |
 |---|---:|---|
-| Lunes a viernes | 7:30 AM | Apertura |
+| Lunes a viernes | 8:00 AM | Apertura |
 | Lunes a viernes | 1:00 PM | Pre-cierre |
 
 - `America/Denver` aplica automáticamente MST/MDT.

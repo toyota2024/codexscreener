@@ -7,11 +7,13 @@ function scoreCandidate(symbol, metrics, market, config) {
 }
 
 function buildSide(bias, symbol, m, market, config) {
+  const entryCheck = validatePullbackEntry(bias, m);
+  if (!entryCheck.passed) return null;
   const trend = scoreTrend(bias, m);
   const volume = scoreVolume(m);
   const momentum = scoreMomentum(bias, m, market);
   const structure = scoreStructure(bias, m);
-  const riskReward = scoreRiskReward(bias, m, config);
+  const riskReward = scoreRiskReward(bias, m, config, entryCheck.entry);
   const emaPenalty = scoreEmaDistancePenalty(m);
   const total = trend.points + volume.points + momentum.points + structure.points + riskReward.points - emaPenalty.points;
   const compression = detectCompression(m);
@@ -55,6 +57,7 @@ function buildSide(bias, symbol, m, market, config) {
       sma20: round(m.sma20),
       sma50: round(m.sma50),
       sma200: round(m.sma200),
+      ema9: round(m.ema9),
       ema20: round(m.ema20),
       macdHistogram: round(m.macdHistogram, 3),
       atr14: round(m.atr14),
@@ -106,12 +109,12 @@ function scoreTrend(bias, m) {
   let points = 0;
   const reasons = [];
   if (bias === 'LONG') {
-    if (m.close > m.sma50) { points += 10; reasons.push('precio > SMA50'); }
-    if (m.close > m.sma200) { points += 10; reasons.push('precio > SMA200'); }
+    if (m.close > m.sma50) { points += 5; reasons.push('precio > SMA50'); }
+    if (m.close > m.sma200) { points += 5; reasons.push('precio > SMA200'); }
     if (m.sma50 > m.sma200) { points += 5; reasons.push('SMA50 > SMA200'); }
   } else {
-    if (m.close < m.sma50) { points += 10; reasons.push('precio < SMA50'); }
-    if (m.close < m.sma200) { points += 10; reasons.push('precio < SMA200'); }
+    if (m.close < m.sma50) { points += 5; reasons.push('precio < SMA50'); }
+    if (m.close < m.sma200) { points += 5; reasons.push('precio < SMA200'); }
     if (m.sma50 < m.sma200) { points += 5; reasons.push('SMA50 < SMA200'); }
   }
   return { points, reasons };
@@ -136,16 +139,16 @@ function scoreMomentum(bias, m, market) {
     if (m.rsi14 >= 50 && m.rsi14 <= 75) { points += 7; reasons.push(`RSI saludable ${round(m.rsi14, 0)}`); }
     if (m.macdHistogram > 0 && m.macd > m.macdSignal) { points += 6; reasons.push('MACD positivo'); }
     if ((m.returns5d || 0) > 0 && (m.returns20d || 0) > 0) { points += 4; reasons.push('price strength'); }
-    if ((m.rsVsSpy20d || 0) > 0 || (m.rsVsQqq20d || 0) > 0) { points += 3; reasons.push('lidera vs SPY/QQQ'); }
+    if ((m.rsVsSpy20d || 0) > 0 || (m.rsVsQqq20d || 0) > 0) { points += 30; reasons.push('lidera vs SPY/QQQ'); }
     if (market.bias === 'BEARISH') points -= 3;
   } else {
     if (m.rsi14 >= 25 && m.rsi14 <= 50) { points += 7; reasons.push(`RSI debil ${round(m.rsi14, 0)}`); }
     if (m.macdHistogram < 0 && m.macd < m.macdSignal) { points += 6; reasons.push('MACD negativo'); }
     if ((m.returns5d || 0) < 0 && (m.returns20d || 0) < 0) { points += 4; reasons.push('debilidad de precio'); }
-    if ((m.rsVsSpy20d || 0) < 0 || (m.rsVsQqq20d || 0) < 0) { points += 3; reasons.push('rezagada vs SPY/QQQ'); }
+    if ((m.rsVsSpy20d || 0) < 0 || (m.rsVsQqq20d || 0) < 0) { points += 30; reasons.push('rezagada vs SPY/QQQ'); }
     if (market.bias === 'BULLISH') points -= 3;
   }
-  return { points: clamp(points, 0, 20), reasons };
+  return { points: clamp(points, 0, 30), reasons };
 }
 
 function scoreStructure(bias, m) {
@@ -155,39 +158,54 @@ function scoreStructure(bias, m) {
   if (bias === 'LONG') {
     if (m.close > m.high20Prev) { points += 10; reasons.push('breakout 20D'); }
     else if (m.close > m.ema20 && m.close > m.sma20) { points += 5; reasons.push('estructura sobre EMA20'); }
-    if (compression.active) { points += 5; reasons.push('compresion previa'); }
+    if (compression.active) { points += 20; reasons.push('compresion previa'); }
     if (m.close > m.low10Prev && m.range10Pct < 0.08) { points += 5; reasons.push('consolidacion saludable'); }
   } else {
     if (m.close < m.low20Prev) { points += 10; reasons.push('breakdown 20D'); }
     else if (m.close < m.ema20 && m.close < m.sma20) { points += 5; reasons.push('estructura bajo EMA20'); }
-    if (compression.active) { points += 5; reasons.push('compresion previa'); }
+    if (compression.active) { points += 20; reasons.push('compresion previa'); }
     if (m.close < m.high10Prev && m.range10Pct < 0.08) { points += 5; reasons.push('rango estrecho bajista'); }
   }
   return { points: clamp(points, 0, 20), reasons, compression };
 }
 
-function scoreRiskReward(bias, m, config) {
-  const entry = bias === 'LONG'
-    ? Math.max(m.close, m.high20Prev || m.close)
-    : Math.min(m.close, m.low20Prev || m.close);
+function scoreRiskReward(bias, m, config, entry) {
   let stop;
   let target;
   if (bias === 'LONG') {
-    const stopTecnico = (m.low10Prev || entry) - m.atr14 * 0.2;
-    const stopATR = entry - m.atr14 * 1.5;
-    stop = Math.max(stopTecnico, stopATR);
-    target = Math.max(entry + m.atr14 * 3.0, m.high20Prev || entry);
+    stop = entry - m.atr14 * 2.0;
+    target = entry + m.atr14 * 4.4;
   } else {
-    const stopTecnico = (m.high10Prev || entry) + m.atr14 * 0.2;
-    const stopATR = entry + m.atr14 * 1.5;
-    stop = Math.min(stopTecnico, stopATR);
-    target = Math.min(entry - m.atr14 * 3.0, m.low20Prev || entry);
+    stop = entry + m.atr14 * 2.0;
+    target = entry - m.atr14 * 4.4;
   }
   const reward = bias === 'LONG' ? target - entry : entry - target;
   const risk = bias === 'LONG' ? entry - stop : stop - entry;
   const rr = risk > 0 ? reward / risk : 0;
   const points = rr >= config.filters.minRR ? 10 : rr >= 1.5 ? 5 : 0;
   return { points, rr, entry, stop, target, reasons: rr >= config.filters.minRR ? [`R:R ${round(rr, 1)}`] : [] };
+}
+
+function validatePullbackEntry(bias, m) {
+  if (!Number.isFinite(m.ema9) || !Number.isFinite(m.ema20) || !Number.isFinite(m.close)) {
+    return { passed: false, reason: 'EMA9/EMA20 no disponible' };
+  }
+  if (bias === 'LONG') {
+    if (Number.isFinite(m.high20Prev) && m.close > m.high20Prev * 1.02) {
+      return { passed: false, reason: 'LONG extendido > high20Prev +2%' };
+    }
+    if (m.close < m.ema20 || m.close > m.ema9) {
+      return { passed: false, reason: 'LONG fuera del canal EMA20-EMA9' };
+    }
+    return { passed: true, entry: m.ema9 };
+  }
+  if (Number.isFinite(m.low20Prev) && m.close < m.low20Prev * 0.98) {
+    return { passed: false, reason: 'SHORT extendido < low20Prev -2%' };
+  }
+  if (m.close < m.ema9 || m.close > m.ema20) {
+    return { passed: false, reason: 'SHORT fuera del canal EMA9-EMA20' };
+  }
+  return { passed: true, entry: m.ema9 };
 }
 
 function detectCompression(m) {
