@@ -66,6 +66,10 @@ function buildSide(bias, symbol, m, market, config) {
       avgVolume20: Math.round(m.avgVolume20 || 0),
       rvol: round(m.rvol, 2),
       coreUniverse: Boolean(m.coreUniverse),
+      reboteOpcionC: bias === 'LONG'
+        ? (m.reboteLong  === true && m.macd > m.macdSignal ? '✅ LONG'  : '—')
+        : (m.reboteShort === true && m.macd < m.macdSignal ? '✅ SHORT' : '—'),
+      reboteTouches: bias === 'LONG' ? (m.supportTouches || 0) : (m.resistanceTouches || 0),
       distEma20Pct: round(getDistEma20Pct(m), 2),
       returns5d: round(m.returns5d, 2),
       returns20d: round(m.returns20d, 2),

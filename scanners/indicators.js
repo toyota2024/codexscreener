@@ -150,6 +150,7 @@ function enrichCandles(candles) {
     atrAvg20: average(a.slice(Math.max(0, i - 20), i).filter(Number.isFinite)),
     atrAvg5: average(a.slice(Math.max(0, i - 5), i).filter(Number.isFinite)),
     range10Pct: rangePct(candles.slice(Math.max(0, i - 10), i + 1)),
+    ...detectReboteRepetido(candles),
     values: {
       sma20: round(s20[i]),
       sma50: round(s50[i]),
@@ -168,6 +169,41 @@ function enrichCandles(candles) {
   };
 }
 
+// --- Opción C: Niveles de Rebote Repetido + MACD ---
+function detectReboteRepetido(candles, lookback = 50, minTouches = 3, zonePct = 0.005, rvolMin = 1.2, volPeriod = 20) {
+  const i = candles.length - 1;
+  if (i < lookback) return { reboteLong: false, reboteShort: false, supportTouches: 0, resistanceTouches: 0 };
+
+  const cur = candles[i];
+  const zonePts = cur.close * zonePct;
+
+  let supportTouches = 0;
+  let resistanceTouches = 0;
+  for (let j = 1; j <= lookback && i - j >= 0; j++) {
+    if (Math.abs(candles[i - j].low  - cur.low)  <= zonePts) supportTouches++;
+    if (Math.abs(candles[i - j].high - cur.high) <= zonePts) resistanceTouches++;
+  }
+
+  const isSupport    = supportTouches    >= minTouches;
+  const isResistance = resistanceTouches >= minTouches;
+
+  const vols = candles.slice(Math.max(0, i - volPeriod), i).map(c => c.volume);
+  const avgVol = vols.length ? vols.reduce((s, v) => s + v, 0) / vols.length : 0;
+  const rvol = avgVol > 0 ? cur.volume / avgVol : 0;
+  const volOk = rvol >= rvolMin;
+
+  const bullCandle = cur.close > cur.open;
+  const bearCandle = cur.close < cur.open;
+
+  return {
+    supportTouches,
+    resistanceTouches,
+    reboteRvol: rvol,
+    reboteLong:  isSupport    && bullCandle && volOk,
+    reboteShort: isResistance && bearCandle && volOk
+  };
+}
+
 function average(values) {
   if (!values.length) return null;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -181,4 +217,4 @@ function rangePct(candles) {
   return close ? (high - low) / close : null;
 }
 
-module.exports = { sma, ema, rsi, macd, atr, bollinger, enrichCandles };
+module.exports = { sma, ema, rsi, macd, atr, bollinger, enrichCandles, detectReboteRepetido };

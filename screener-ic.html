@@ -433,6 +433,14 @@
             </div>
             <div class="score ${scoreClass}">${c.score}</div>
           </div>
+          ${(m.reboteOpcionC && m.reboteOpcionC !== '—') ? `
+          <div style="margin:8px 0 4px;padding:8px 12px;border-radius:7px;border:1px solid #1d6d48;background:#0a2218;display:flex;align-items:center;gap:10px;">
+            <span style="font-size:15px;">🎯</span>
+            <div>
+              <div style="font-size:11px;color:#6ee7b7;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;">Opción C + MACD</div>
+              <div style="font-size:12px;color:#a7f3d0;margin-top:2px;">${escapeHtml(m.reboteOpcionC)} — Nivel con <strong>${m.reboteTouches || 0} toques</strong> · RVOL ${fmt(m.rvol, 2)}x · MACD ${c.bias === 'LONG' ? 'alcista' : 'bajista'}</div>
+            </div>
+          </div>` : ''}
           <div class="detail-grid">
             <div class="detail"><span>Entry</span>${escapeHtml(c.entryIdea)}</div>
             <div class="detail"><span>Stop</span>${escapeHtml(c.stopIdea)}</div>
@@ -444,7 +452,7 @@
             <div class="detail"><span>RSI14</span>${fmt(m.rsi14, 1)}</div>
             <div class="detail"><span>SMA50/200</span>${fmt(m.sma50, 2)} / ${fmt(m.sma200, 2)}</div>
             <div class="detail"><span>Rel Strength</span>${escapeHtml(c.relativeStrength)}</div>
-            <div class="detail"><span>Compression</span>${escapeHtml(m.compression || '--')}</div>
+            <div class="detail"><span>Opción C Toques</span>${m.reboteTouches ?? '--'}</div>
           </div>
           <div class="breakdown">
             <span class="tag">Trend ${b.trend ?? 0}/15</span>
