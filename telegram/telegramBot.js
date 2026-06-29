@@ -139,7 +139,10 @@ function formatCandidateDetails(candidate) {
     `\u{1F6D1} Stop: ${formatMoney(candidate.stopPrice)}`,
     `\u{1F3AF} Target: ${formatMoney(candidate.targetPrice)}`,
     `\u{1F4C9} RSI: ${formatNumber(candidate.metrics?.rsi14, 1)} | Fuerza Relativa: ${escapeHtml(candidate.relativeStrength || 'n/a')}`,
-    `\u{1F56F}\uFE0F Compresi\u00f3n: ${compression}`
+    `\u{1F56F}\uFE0F Compresi\u00f3n: ${compression}`,
+    candidate.metrics?.reboteOpcionC && candidate.metrics.reboteOpcionC !== '\u2014'
+      ? `\u{1F3AF} Opci\u00f3n C: ${escapeHtml(candidate.metrics.reboteOpcionC)} \u2014 ${escapeHtml(candidate.metrics.reboteTouches || 0)} toques \u00B7 RVOL ${formatNumber(candidate.metrics.rvol, 2)}x`
+      : null
   ].filter(Boolean).join('\n');
 }
 
