@@ -1,3 +1,174 @@
 {
-  "records": []
+  "records": [
+    {
+      "key": "PCAR:LONG:1782932400000",
+      "timestamp": "2026-07-01T19:00:26.444Z",
+      "lastSeenAt": "2026-07-01T19:00:26.444Z",
+      "seenCount": 1,
+      "ticker": "PCAR",
+      "name": "PACCAR Inc",
+      "bias": "LONG",
+      "historyType": "MONITOR",
+      "score": 75,
+      "riskReward": 2.2,
+      "setup": "Compression preparing expansion",
+      "entryPrice": 120.83,
+      "stopPrice": 114.44,
+      "targetPrice": 134.88,
+      "spyPriceAtScan": 746.9650268554688,
+      "spyWeeklyReturnAtScan": 1.8718341612418927,
+      "spyWeeklyStateAtScan": "UP",
+      "marketBiasAtScan": "BULLISH",
+      "coreSatellite": {
+        "type": "CORE",
+        "label": "CORE",
+        "reason": "S&P/Nasdaq 100 proxy + ATR bajo"
+      },
+      "distEma20Pct": 1.97,
+      "validations": {
+        "5D": null,
+        "15D": null,
+        "30D": null
+      }
+    },
+    {
+      "key": "UNH:LONG:1782932400000",
+      "timestamp": "2026-07-01T19:00:26.444Z",
+      "lastSeenAt": "2026-07-01T19:00:26.444Z",
+      "seenCount": 1,
+      "ticker": "UNH",
+      "name": "UnitedHealth Group Incorporated",
+      "bias": "LONG",
+      "historyType": "MONITOR",
+      "score": 75,
+      "riskReward": 2.2,
+      "setup": "Compression preparing expansion",
+      "entryPrice": 420.23,
+      "stopPrice": 399.67,
+      "targetPrice": 465.45,
+      "spyPriceAtScan": 746.9650268554688,
+      "spyWeeklyReturnAtScan": 1.8718341612418927,
+      "spyWeeklyStateAtScan": "UP",
+      "marketBiasAtScan": "BULLISH",
+      "coreSatellite": {
+        "type": "CORE",
+        "label": "CORE",
+        "reason": "S&P/Nasdaq 100 proxy + ATR bajo"
+      },
+      "distEma20Pct": 4.96,
+      "validations": {
+        "5D": null,
+        "15D": null,
+        "30D": null
+      }
+    },
+    {
+      "key": "ELV:LONG:1782932400000",
+      "timestamp": "2026-07-01T19:00:26.444Z",
+      "lastSeenAt": "2026-07-01T19:00:26.444Z",
+      "seenCount": 1,
+      "ticker": "ELV",
+      "name": "Elevance Health, Inc.",
+      "bias": "LONG",
+      "historyType": "MONITOR",
+      "score": 75,
+      "riskReward": 2.2,
+      "setup": "Compression preparing expansion",
+      "entryPrice": 399.1,
+      "stopPrice": 376.87,
+      "targetPrice": 448.01,
+      "spyPriceAtScan": 746.9650268554688,
+      "spyWeeklyReturnAtScan": 1.8718341612418927,
+      "spyWeeklyStateAtScan": "UP",
+      "marketBiasAtScan": "BULLISH",
+      "coreSatellite": {
+        "type": "CORE",
+        "label": "CORE",
+        "reason": "S&P/Nasdaq 100 proxy + ATR bajo"
+      },
+      "distEma20Pct": 4.16,
+      "validations": {
+        "5D": null,
+        "15D": null,
+        "30D": null
+      }
+    },
+    {
+      "key": "WFC:LONG:1782932400000",
+      "timestamp": "2026-07-01T19:00:26.444Z",
+      "lastSeenAt": "2026-07-01T19:00:26.444Z",
+      "seenCount": 1,
+      "ticker": "WFC",
+      "name": "Wells Fargo & Company",
+      "bias": "LONG",
+      "historyType": "MONITOR",
+      "score": 70,
+      "riskReward": 2.2,
+      "setup": "Compression preparing expansion",
+      "entryPrice": 84.69,
+      "stopPrice": 80.74,
+      "targetPrice": 93.38,
+      "spyPriceAtScan": 746.9650268554688,
+      "spyWeeklyReturnAtScan": 1.8718341612418927,
+      "spyWeeklyStateAtScan": "UP",
+      "marketBiasAtScan": "BULLISH",
+      "coreSatellite": {
+        "type": "CORE",
+        "label": "CORE",
+        "reason": "S&P/Nasdaq 100 proxy + ATR bajo"
+      },
+      "distEma20Pct": 3.45,
+      "validations": {
+        "5D": null,
+        "15D": null,
+        "30D": null
+      }
+    },
+    {
+      "key": "LIN:LONG:1782932400000",
+      "timestamp": "2026-07-01T19:00:26.444Z",
+      "lastSeenAt": "2026-07-01T19:00:26.444Z",
+      "seenCount": 1,
+      "ticker": "LIN",
+      "name": "Linde plc",
+      "bias": "LONG",
+      "historyType": "MONITOR",
+      "score": 70,
+      "riskReward": 2.2,
+      "setup": "Breakout after consolidation",
+      "entryPrice": 525.12,
+      "stopPrice": 502.17,
+      "targetPrice": 575.62,
+      "spyPriceAtScan": 746.9650268554688,
+      "spyWeeklyReturnAtScan": 1.8718341612418927,
+      "spyWeeklyStateAtScan": "UP",
+      "marketBiasAtScan": "BULLISH",
+      "coreSatellite": {
+        "type": "CORE",
+        "label": "CORE",
+        "reason": "S&P/Nasdaq 100 proxy + ATR bajo"
+      },
+      "distEma20Pct": 3.63,
+      "validations": {
+        "5D": null,
+        "15D": null,
+        "30D": null
+      }
+    }
+  ],
+  "scans": [
+    {
+      "key": "1782932400000",
+      "timestamp": "2026-07-01T19:00:26.444Z",
+      "marketBias": "BULLISH",
+      "candidateKeys": [
+        "PCAR:LONG:1782932400000",
+        "UNH:LONG:1782932400000",
+        "ELV:LONG:1782932400000",
+        "WFC:LONG:1782932400000",
+        "LIN:LONG:1782932400000"
+      ]
+    }
+  ],
+  "updatedAt": "2026-07-01T19:00:26.444Z"
 }

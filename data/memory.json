@@ -93,19 +93,28 @@
     }
   },
   "lastScan": {
-    "timestamp": "2026-05-21T06:13:14.014Z",
-    "long": [
-      "GS",
-      "IMVT",
-      "ROIV",
-      "RXO",
-      "WMT"
-    ],
-    "short": [
-      "ICE",
-      "GDS",
-      "BILI",
-      "ELF"
+    "timestamp": "2026-07-01T19:00:26.444Z",
+    "long": [],
+    "short": [],
+    "monitor": [
+      "PCAR",
+      "UNH",
+      "ELV",
+      "WFC",
+      "LIN"
     ]
+  },
+  "autoScanRuns": {
+    "2026-07-01:preclose": {
+      "status": "sent",
+      "attempts": 1,
+      "createdAt": "2026-07-01T19:00:06.236Z",
+      "lastAttemptAt": "2026-07-01T19:00:06.236Z",
+      "label": "1:00 PM (pre-cierre)",
+      "pendingMessage": null,
+      "scanTimestamp": "2026-07-01T19:00:26.444Z",
+      "completedAt": "2026-07-01T19:00:06.236Z",
+      "lastError": null
+    }
   }
 }
