@@ -12,6 +12,9 @@
   },
   "history": {
     "dedupeWindowMinutes": 60,
+    "extendedDedupeWindowHours": 48,
+    "extendedDedupePriceThresholdPct": 2,
+    "extendedDedupeScoreThreshold": 8,
     "neutralBandPct": 2,
     "validationWindowsDays": [5, 15, 30]
   },

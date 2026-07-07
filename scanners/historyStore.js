@@ -19,22 +19,23 @@ function updateScanHistory(scanResult, config) {
   ];
 
   const candidateKeys = [];
+  const updatedRecordKeysThisScan = new Set();
   for (const { candidate, historyType } of candidates) {
     const key = makeRecordKey(candidate, scanTs, windowMs);
-    candidateKeys.push(key);
     const existing = records.find(record => record.key === key);
     const payload = buildRecord(candidate, scanResult, key, validationWindows, historyType);
     if (existing) {
-      const timestamp = existing.timestamp;
-      const validations = existing.validations || payload.validations;
-      const seenCount = (existing.seenCount || 1) + 1;
-      Object.assign(existing, payload, {
-        timestamp,
-        validations,
-        seenCount,
-        lastSeenAt: scanResult.timestamp
-      });
+      candidateKeys.push(existing.key);
+      updateExistingRecord(existing, payload, scanResult.timestamp, updatedRecordKeysThisScan);
+      continue;
+    }
+
+    const similar = findRecentSimilarRecord(records, candidate, historyType, scanResult.timestamp, config);
+    if (similar) {
+      candidateKeys.push(similar.key);
+      updateSignalSeen(similar, scanResult.timestamp, updatedRecordKeysThisScan);
     } else {
+      candidateKeys.push(key);
       records.push(payload);
     }
   }
@@ -72,6 +73,85 @@ function makeRecordKey(candidate, scanTs, windowMs) {
   return `${candidate.ticker}:${candidate.bias}:${bucket}`;
 }
 
+function updateExistingRecord(record, payload, nowIso, updatedRecordKeysThisScan) {
+  const timestamp = record.timestamp;
+  const validations = record.validations || payload.validations;
+  const seenCount = record.seenCount;
+  Object.assign(record, payload, {
+    timestamp,
+    validations,
+    seenCount
+  });
+  updateSignalSeen(record, nowIso, updatedRecordKeysThisScan);
+}
+
+function updateSignalSeen(record, nowIso, updatedRecordKeysThisScan) {
+  if (!updatedRecordKeysThisScan.has(record.key)) {
+    record.seenCount = (record.seenCount || 1) + 1;
+    updatedRecordKeysThisScan.add(record.key);
+  }
+  record.lastSeenAt = nowIso;
+  record.signalDurationHours = getSignalDurationHours(record, nowIso);
+}
+
+function normalizeSetup(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function hasSetup(value) {
+  return normalizeSetup(value).length > 0;
+}
+
+function getSignalDurationHours(record, nowIso) {
+  const start = Date.parse(record.timestamp);
+  const now = Date.parse(nowIso);
+  if (!Number.isFinite(start) || !Number.isFinite(now)) return null;
+  return round((now - start) / 3600000, 1);
+}
+
+function findRecentSimilarRecord(records, candidate, historyType, nowIso, config) {
+  const now = Date.parse(nowIso);
+  const historyConfig = config.history || {};
+  const windowHours = historyConfig.extendedDedupeWindowHours ?? 48;
+  const priceThresholdPct = historyConfig.extendedDedupePriceThresholdPct ?? 2;
+  const scoreThreshold = historyConfig.extendedDedupeScoreThreshold ?? 8;
+  const windowMs = windowHours * 60 * 60 * 1000;
+
+  const candidateEntry = Number(candidate.entryPrice ?? candidate.metrics?.price);
+  const candidateScore = Number(candidate.score);
+  const candidateSetup = normalizeSetup(candidate.setup);
+  if (!hasSetup(candidate.setup)) return null;
+
+  return records.find(record => {
+    if (record.ticker !== candidate.ticker) return false;
+    if (record.bias !== candidate.bias) return false;
+    if (record.historyType !== historyType) return false;
+    if (!hasSetup(record.setup)) return false;
+
+    const lastSeen = Date.parse(record.lastSeenAt || record.timestamp);
+    if (!Number.isFinite(lastSeen)) return false;
+    if (now - lastSeen > windowMs) return false;
+
+    const recordEntry = Number(record.entryPrice);
+    const recordScore = Number(record.score);
+    const recordSetup = normalizeSetup(record.setup);
+
+    const priceChangePct = Number.isFinite(candidateEntry) && Number.isFinite(recordEntry) && recordEntry
+      ? Math.abs((candidateEntry - recordEntry) / recordEntry) * 100
+      : Infinity;
+
+    const scoreChange = Number.isFinite(candidateScore) && Number.isFinite(recordScore)
+      ? Math.abs(candidateScore - recordScore)
+      : Infinity;
+
+    return (
+      priceChangePct < priceThresholdPct &&
+      scoreChange < scoreThreshold &&
+      candidateSetup === recordSetup
+    );
+  }) || null;
+}
+
 function buildRecord(candidate, scanResult, key, validationWindows, historyType) {
   const spy = scanResult.market?.spy || {};
   const validations = {};
@@ -99,6 +179,7 @@ function buildRecord(candidate, scanResult, key, validationWindows, historyType)
     marketBiasAtScan: scanResult.market?.bias || 'NEUTRAL',
     coreSatellite: candidate.coreSatellite || null,
     distEma20Pct: candidate.metrics?.distEma20Pct ?? null,
+    signalDurationHours: 0,
     validations
   };
 }
