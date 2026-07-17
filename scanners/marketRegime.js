@@ -62,6 +62,7 @@ async function loadVixData() {
 
 function scoreIndex(metrics) {
   if (!metrics) return null;
+  const returns5dAvailable = Number.isFinite(metrics.returns5d);
   let score = 0;
   if (metrics.close > metrics.sma50) score += 1;
   else score -= 1;
@@ -69,14 +70,15 @@ function scoreIndex(metrics) {
   else score -= 1;
   if (metrics.sma50 > metrics.sma200) score += 1;
   else score -= 1;
-  if ((metrics.returns5d || 0) > 0) score += 1;
+  if (returns5dAvailable && metrics.returns5d > 0) score += 1;
   else score -= 1;
   return {
     symbol: metrics.symbol,
     score,
     price: metrics.close,
-    returns5d: metrics.returns5d,
+    returns5d: returns5dAvailable ? metrics.returns5d : null,
     returns20d: metrics.returns20d,
+    missingData: returns5dAvailable ? [] : ['returns5d'],
     trend: score >= 2 ? 'UP' : score <= -2 ? 'DOWN' : 'MIXED'
   };
 }

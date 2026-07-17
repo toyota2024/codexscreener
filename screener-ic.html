@@ -249,6 +249,11 @@
       </div>
     </section>
 
+    <section class="panel full" style="margin-top:14px">
+      <div class="panel-head"><div class="panel-title">Observability</div><span id="observabilityStatus" class="muted tiny">No scan yet</span></div>
+      <div class="panel-body"><div id="observability" class="muted">Run a scan to see funnel and rejection reasons.</div></div>
+    </section>
+
     <section class="grid" style="margin-top:14px">
       <div class="panel">
         <div class="panel-head"><div class="panel-title">Candidates</div></div>
@@ -363,6 +368,7 @@
         $('regime').textContent = state.result.market?.bias || '--';
         $('universe').textContent = state.result.universeSize || 0;
         $('counts').textContent = `${state.result.longCandidates.length} / ${state.result.shortCandidates.length}`;
+        renderObservability();
         $('sendBtn').disabled = !topCandidates().length || !state.config.telegramConfigured;
         logLine(`Scan complete: ${state.result.longCandidates.length} long, ${state.result.shortCandidates.length} short, ${(state.result.monitoringCandidates || []).length} monitoreo.`);
         if (state.result.errorCount) logLine(`Partial errors: ${state.result.errorCount}.`);
@@ -378,6 +384,26 @@
         state.running = false;
         $('scanBtn').disabled = false;
       }
+    }
+
+    function renderObservability() {
+      const result = state.result;
+      const funnel = result?.funnel || {};
+      const tiers = result?.tierCounts || {};
+      const rejects = result?.rejectionSummary?.counts || {};
+      const samples = result?.rejectionSummary?.samples || [];
+      const funnelText = Object.entries(funnel).map(([key, value]) => `${escapeHtml(key)}: ${escapeHtml(value)}`).join(' · ');
+      const tierText = Object.entries(tiers).map(([key, value]) => `${escapeHtml(key)}: ${escapeHtml(value)}`).join(' · ');
+      const rejectionText = Object.entries(rejects).map(([key, value]) => `${escapeHtml(key)}: ${escapeHtml(value)}`).join(' · ') || 'none';
+      const sampleText = samples.slice(0, 8).map(item => `${escapeHtml(item.ticker)}=${escapeHtml(item.code)}`).join(' · ') || 'none';
+      const fallback = result?.marketFallback;
+      $('observabilityStatus').textContent = `${result?.errorCount || 0} provider errors`;
+      $('observability').innerHTML = `
+        <div><strong>Funnel</strong><br>${funnelText || '--'}</div>
+        <div style="margin-top:8px"><strong>Tiers</strong><br>${tierText || '--'}</div>
+        <div style="margin-top:8px"><strong>Reject codes</strong><br>${rejectionText}</div>
+        <div style="margin-top:8px"><strong>Examples</strong><br>${sampleText}</div>
+        <div style="margin-top:8px"><strong>SHORT fallback</strong><br>${escapeHtml(fallback?.behavior || '--')} · shortAllowed=${escapeHtml(fallback?.shortAllowed)}</div>`;
     }
 
     function renderCandidates() {
@@ -411,7 +437,7 @@
     function renderCandidate(c) {
       const sideClass = c.bias === 'LONG' ? 'long' : 'short';
       const monitorClass = state.tab === 'monitor' ? ' monitor' : '';
-      const priorityClass = c.score >= 85 && c.score <= 90 ? 'priority-band' : '';
+      const priorityClass = c.score >= 85 ? 'priority-band' : '';
       const scoreClass = c.score >= 85 ? 'good' : 'mid';
       const b = c.scoreBreakdown || {};
       const m = c.metrics || {};
@@ -423,6 +449,7 @@
               <button class="ticker" type="button" data-copy-ticker="${escapeHtml(c.ticker)}" title="Copy ${escapeHtml(c.ticker)}">${escapeHtml(c.ticker)}</button>
               ${c.name ? `<span class="company-name">${escapeHtml(c.name)}</span>` : ''}
               <span class="tag ${sideClass}">${escapeHtml(c.bias)}</span>
+              <span class="tag">${escapeHtml(c.tier || 'SIN_TIER')}</span>
               <span class="tag">${escapeHtml(c.setup)}</span>
             </div>
             <div style="flex:1">
@@ -558,22 +585,10 @@
         const fecha = new Date(entry.fecha).toLocaleString();
         html += '<div class="history-entry">';
         html += `<div class="history-header"><span class="date">${escapeHtml(fecha)}</span><span class="market-tag ${biasClass}">${escapeHtml(entry.mercado || 'N/A')}</span><span class="muted tiny">${entry.candidatos.length} candidatos</span></div>`;
-        if (entry.candidatos.length) {
-          html += '<div class="table-scroll"><table class="history-table"><thead><tr><th>Ticker</th><th>Bias</th><th>Score</th><th>R:R</th><th>Entrada</th><th>5D</th><th>15D</th><th>30D</th></tr></thead><tbody>';
-          for (const c of entry.candidatos) {
-            html += '<tr>';
-            html += `<td><strong>${escapeHtml(c.ticker)}</strong><br><span class="muted tiny">${escapeHtml(c.nombre || '')}</span></td>`;
-            html += `<td><span class="tag ${c.bias === 'LONG' ? 'long' : 'short'}">${escapeHtml(c.bias)}</span></td>`;
-            html += `<td>${c.score}</td>`;
-            html += `<td>${fmt(c.riskReward, 2)}</td>`;
-            html += `<td>$${fmt(c.entrada, 2)}</td>`;
-            html += `<td class="${resClass(c.resultado_5d)}">${resText(c.resultado_5d)}</td>`;
-            html += `<td class="${resClass(c.resultado_15d)}">${resText(c.resultado_15d)}</td>`;
-            html += `<td class="${resClass(c.resultado_30d)}">${resText(c.resultado_30d)}</td>`;
-            html += '</tr>';
-          }
-          html += '</tbody></table></div>';
-        }
+        const complete = entry.candidatos.filter(hasCompleteWindow);
+        const partial = entry.candidatos.filter(hasPartialWindow);
+        if (complete.length) html += renderHistoryTable('Ventanas COMPLETE', complete, 'COMPLETE');
+        if (partial.length) html += renderHistoryTable('Ventanas PARTIAL (excluidas)', partial, 'PARTIAL');
         html += '</div>';
       }
       container.innerHTML = html;
@@ -598,6 +613,37 @@
       }
     }
 
+    function hasCompleteWindow(candidate) {
+      return ['5D', '15D', '30D'].some(window => candidate[`sampleStatus_${window.toLowerCase()}`] === 'COMPLETE');
+    }
+
+    function hasPartialWindow(candidate) {
+      return ['5D', '15D', '30D'].some(window => candidate[`sampleStatus_${window.toLowerCase()}`] === 'PARTIAL');
+    }
+
+    function renderHistoryTable(title, candidates, status) {
+      let html = `<h4 style="margin:12px 0 6px">${escapeHtml(title)}</h4><div class="table-scroll"><table class="history-table"><thead><tr><th>Ticker</th><th>Bias</th><th>Setup</th><th>Cap</th><th>Score</th><th>R:R</th><th>Entrada</th><th>5D</th><th>MAE/MFE 5D</th><th>15D</th><th>MAE/MFE 15D</th><th>30D</th><th>MAE/MFE 30D</th></tr></thead><tbody>`;
+      for (const c of candidates) {
+        html += '<tr>';
+        html += `<td><strong>${escapeHtml(c.ticker)}</strong><br><span class="muted tiny">${escapeHtml(c.nombre || '')}</span></td>`;
+        html += `<td><span class="tag ${c.bias === 'LONG' ? 'long' : 'short'}">${escapeHtml(c.bias)}</span></td>`;
+        html += `<td>${escapeHtml(c.setupCategory || 'UNKNOWN')}</td><td>${escapeHtml(c.capCategory || 'UNKNOWN')}</td>`;
+        html += `<td>${c.score}</td><td>${fmt(c.riskReward, 2)}</td><td>$${fmt(c.entrada, 2)}</td>`;
+        for (const days of [5, 15, 30]) {
+          const suffix = `${days}d`;
+          const value = c[`resultado_${suffix}`];
+          const mae = c[`mae_${suffix}`];
+          const mfe = c[`mfe_${suffix}`];
+          const sampleStatus = c[`sampleStatus_${suffix}`];
+          const visible = sampleStatus === status;
+          html += `<td class="${resClass(visible ? value : null)}">${visible ? resText(value) : '\u2014'}</td>`;
+          html += `<td>${visible ? excursionText(mae, mfe) : '\u2014'}</td>`;
+        }
+        html += '</tr>';
+      }
+      return html + '</tbody></table></div>';
+    }
+
     function renderWinRateSummary() {
       const types = ['LONG', 'SHORT', 'MONITOR'];
       const windows = ['5D', '15D', '30D'];
@@ -611,7 +657,22 @@
         }
         html += '</tr>';
       }
-      return html + '</tbody></table></div>';
+      html += '</tbody></table>';
+      const sampleCounts = state.historySummary?.sampleStatusCounts || {};
+      html += `<div class="muted tiny" style="margin-top:8px">Muestras por ventana: ${escapeHtml(JSON.stringify(sampleCounts))}. PARTIAL e INSUFFICIENT_SAMPLE quedan fuera del cálculo.</div>`;
+      for (const [segment, values] of Object.entries(state.historySummary?.segments || {})) {
+        html += `<h4 style="margin:14px 0 6px">${escapeHtml(segment)}</h4><table class="win-rate-table"><thead><tr><th>Segmento</th><th>5D</th><th>15D</th><th>30D</th></tr></thead><tbody>`;
+        for (const [label, cells] of Object.entries(values)) {
+          html += `<tr><td><strong>${escapeHtml(label)}</strong></td>`;
+          for (const window of windows) {
+            const cell = cells[window];
+            html += `<td>${cell?.total ? `${cell.wins}/${cell.total} (${fmt(cell.winRate, 1)}%)` : 'Sin datos'}</td>`;
+          }
+          html += '</tr>';
+        }
+        html += '</tbody></table>';
+      }
+      return html + '</div>';
     }
 
     function resClass(val) {
@@ -622,6 +683,11 @@
     function resText(val) {
       if (val === null || val === undefined) return '\u2014';
       return (val >= 0 ? '+' : '') + Number(val).toFixed(2) + '%';
+    }
+
+    function excursionText(mae, mfe) {
+      if (mae == null && mfe == null) return '\u2014';
+      return `MAE ${resText(mae)} / MFE ${resText(mfe)}`;
     }
 
     init().catch(error => logLine(`Init error: ${error.message}`));

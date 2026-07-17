@@ -90,18 +90,53 @@
       "bias": "SHORT",
       "setup": "Breakdown with weakness",
       "timestamp": 1779344011685
+    },
+    "EXC:LONG": {
+      "score": 87,
+      "bias": "LONG",
+      "setup": "Breakout after consolidation",
+      "timestamp": 1783143507570
+    },
+    "NEE:LONG": {
+      "score": 82,
+      "bias": "LONG",
+      "setup": "Compression preparing expansion",
+      "timestamp": 1783143507570
+    },
+    "CI:LONG": {
+      "score": 82,
+      "bias": "LONG",
+      "setup": "Trend continuation pullback",
+      "timestamp": 1783143507570
+    },
+    "DUK:LONG": {
+      "score": 82,
+      "bias": "LONG",
+      "setup": "Breakout after consolidation",
+      "timestamp": 1783143507570
     }
   },
   "lastScan": {
-    "timestamp": "2026-07-01T19:00:26.444Z",
-    "long": [],
+    "timestamp": "2026-07-17T06:11:42.345Z",
+    "long": [
+      "MNST",
+      "MO",
+      "BTI",
+      "UNH",
+      "PM"
+    ],
     "short": [],
     "monitor": [
+      "BKD",
+      "MRK",
+      "BIIB",
+      "MDLZ",
+      "NU",
+      "SBUX",
+      "EXC",
       "PCAR",
-      "UNH",
-      "ELV",
-      "WFC",
-      "LIN"
+      "WBD",
+      "PG"
     ]
   },
   "autoScanRuns": {
@@ -115,6 +150,16 @@
       "scanTimestamp": "2026-07-01T19:00:26.444Z",
       "completedAt": "2026-07-01T19:00:06.236Z",
       "lastError": null
+    },
+    "2026-07-07:preclose": {
+      "status": "retry",
+      "attempts": 1,
+      "createdAt": "2026-07-07T19:21:04.623Z",
+      "lastAttemptAt": "2026-07-07T19:21:04.623Z",
+      "label": "1:00 PM (pre-cierre)",
+      "pendingMessage": "🎯 <b>SCREENER — 1:00 PM (pre-cierre)</b>\nRégimen: <b>NEUTRAL</b>\n\n📈 <b>LONG:</b>\nSin candidatos\n\n📉 <b>SHORT:</b>\nSin candidatos\n\n👀 <b>MONITOR:</b>\nSin candidatos\n\nNo constituye recomendación financiera.",
+      "scanTimestamp": "2026-07-07T19:21:05.458Z",
+      "lastError": "getaddrinfo ENOTFOUND api.telegram.org"
     }
   }
 }

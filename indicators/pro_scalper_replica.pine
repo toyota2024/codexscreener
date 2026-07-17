@@ -1,0 +1,152 @@
+//@version=5
+indicator("Pro Scalper Replica", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=100)
+
+// Original approximation inspired by the public Pro Scalper description.
+// The invite-only source code is not copied or recovered.
+
+groupEngine = "Signal Engine"
+atrLen      = input.int(30, "Supertrend ATR Period", minval=1, group=groupEngine, display=display.none)
+mult        = input.float(2.0, "Supertrend Sensitivity", minval=0.1, step=0.1, group=groupEngine, display=display.none)
+kalmanQ     = input.float(0.08, "Kalman Smoothing", minval=0.001, maxval=1.0, step=0.001, group=groupEngine, display=display.none)
+cooldown    = input.int(3, "Signal Cooldown", minval=0, group=groupEngine, display=display.none)
+
+groupZones  = "VWMA Zones"
+zoneLen     = input.int(50, "Zone Length", minval=2, group=groupZones, display=display.none)
+zoneMult    = input.float(1.0, "Zone Multiplier", minval=0.1, step=0.1, group=groupZones, display=display.none)
+showZones   = input.bool(true, "Show Overbought/Oversold Zones", group=groupZones, display=display.none)
+showR       = input.bool(true, "Show Reversal R Labels", group=groupZones, display=display.none)
+
+groupTrade  = "Trade Management"
+showTP      = input.bool(true, "Show Take Profit X", group=groupTrade, display=display.none)
+rrTarget    = input.float(1.2, "Fallback Take Profit R", minval=0.25, step=0.25, group=groupTrade, display=display.none)
+swingLen    = input.int(10, "Price Action Lookback", minval=1, group=groupTrade, display=display.none)
+
+chartOnly = display.all - display.status_line - display.price_scale
+
+// ------------------------- Kalman adapted price and ATR
+src = hl2
+rawAtr = ta.atr(atrLen)
+measurementNoise = 1.0
+
+var float kPrice = na
+var float pPrice = 1.0
+if na(kPrice)
+    kPrice := src
+else
+    pPrice += kalmanQ
+    gainPrice = pPrice / (pPrice + measurementNoise)
+    kPrice += gainPrice * (src - kPrice)
+    pPrice *= 1.0 - gainPrice
+
+var float kAtr = na
+var float pAtr = 1.0
+if na(kAtr)
+    kAtr := rawAtr
+else
+    pAtr += kalmanQ
+    gainAtr = pAtr / (pAtr + measurementNoise)
+    kAtr += gainAtr * (rawAtr - kAtr)
+    pAtr *= 1.0 - gainAtr
+
+// ------------------------- Adapted Supertrend
+basicUpper = kPrice + mult * kAtr
+basicLower = kPrice - mult * kAtr
+
+var float upperBand = na
+var float lowerBand = na
+upperBand := na(upperBand[1]) ? basicUpper : basicUpper < upperBand[1] or close[1] > upperBand[1] ? basicUpper : upperBand[1]
+lowerBand := na(lowerBand[1]) ? basicLower : basicLower > lowerBand[1] or close[1] < lowerBand[1] ? basicLower : lowerBand[1]
+
+var int trend = 1
+trend := nz(trend[1], 1)
+trend := trend[1] == -1 and close > upperBand[1] ? 1 : trend[1] == 1 and close < lowerBand[1] ? -1 : trend
+stLine = trend == 1 ? lowerBand : upperBand
+
+buySignalRaw = trend == 1 and trend[1] == -1 and barstate.isconfirmed
+sellSignalRaw = trend == -1 and trend[1] == 1 and barstate.isconfirmed
+
+var int lastSignalBar = na
+cooldownOk = na(lastSignalBar) or bar_index - lastSignalBar >= cooldown
+buySignal = buySignalRaw and cooldownOk
+sellSignal = sellSignalRaw and cooldownOk
+if buySignal or sellSignal
+    lastSignalBar := bar_index
+
+// ------------------------- VWMA dynamic exhaustion zones
+vwmaBasis = ta.vwma(hlc3, zoneLen)
+highestWeighted = ta.vwma(ta.highest(high, zoneLen), zoneLen)
+lowestWeighted = ta.vwma(ta.lowest(low, zoneLen), zoneLen)
+upperZone = vwmaBasis + (highestWeighted - vwmaBasis) * zoneMult
+lowerZone = vwmaBasis - (vwmaBasis - lowestWeighted) * zoneMult
+
+inOverbought = high >= upperZone
+inOversold = low <= lowerZone
+reversalDown = showR and inOverbought[1] and close < upperZone and close < open and barstate.isconfirmed
+reversalUp = showR and inOversold[1] and close > lowerZone and close > open and barstate.isconfirmed
+
+// ------------------------- TP logic
+var bool active = false
+var int tradeDir = 0
+var float entry = na
+var float stop = na
+var float tp = na
+var float lastEntry = na
+var string lastSide = "Flat"
+
+swingLow = ta.lowest(low, swingLen)
+swingHigh = ta.highest(high, swingLen)
+
+if buySignal or sellSignal
+    active := true
+    tradeDir := buySignal ? 1 : -1
+    entry := close
+    lastEntry := entry
+    lastSide := buySignal ? "BUY" : "SELL"
+    stop := tradeDir == 1 ? swingLow : swingHigh
+    risk = math.max(math.abs(entry - stop), syminfo.mintick)
+    zoneTarget = tradeDir == 1 ? upperZone : lowerZone
+    fallbackTarget = tradeDir == 1 ? entry + risk * rrTarget : entry - risk * rrTarget
+    tp := tradeDir == 1 ? math.max(zoneTarget, fallbackTarget) : math.min(zoneTarget, fallbackTarget)
+
+tpHit = active and showTP and (tradeDir == 1 ? high >= tp : low <= tp)
+oppositeSignal = active and (tradeDir == 1 ? sellSignal : buySignal)
+if tpHit or oppositeSignal
+    active := false
+
+// ------------------------- Visuals
+plot(stLine, "Kalman Supertrend", color=trend == 1 ? color.lime : color.red, linewidth=2, display=chartOnly)
+plot(showZones ? upperZone : na, "Overbought VWMA Band", color=color.new(color.red, 45), linewidth=1, display=chartOnly)
+plot(showZones ? lowerZone : na, "Oversold VWMA Band", color=color.new(color.lime, 45), linewidth=1, display=chartOnly)
+pBasis = plot(showZones ? vwmaBasis : na, "VWMA Basis", color=color.new(color.gray, 65), linewidth=1, display=chartOnly)
+pUpper = plot(showZones ? upperZone : na, "OB Fill Edge", color=color.new(color.red, 100), display=chartOnly)
+pLower = plot(showZones ? lowerZone : na, "OS Fill Edge", color=color.new(color.lime, 100), display=chartOnly)
+fill(pBasis, pUpper, color=color.new(color.red, 97), title="Overbought Zone")
+fill(pBasis, pLower, color=color.new(color.lime, 97), title="Oversold Zone")
+
+barcolor(trend == 1 ? color.new(color.lime, 0) : color.new(color.red, 0))
+
+plotshape(buySignal, "BUY", style=shape.labelup, location=location.belowbar, color=color.lime, text="BUY", textcolor=color.black, size=size.small, display=chartOnly)
+plotshape(sellSignal, "SELL", style=shape.labeldown, location=location.abovebar, color=color.red, text="SELL", textcolor=color.white, size=size.small, display=chartOnly)
+plotshape(reversalUp, "R Up", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), text="R", textcolor=color.black, size=size.tiny, display=chartOnly)
+plotshape(reversalDown, "R Down", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="R", textcolor=color.white, size=size.tiny, display=chartOnly)
+if tpHit
+    label.new(bar_index, tp, "X", style=label.style_label_center, color=color.yellow, textcolor=color.black, size=size.tiny)
+
+plot(active ? entry : na, "Entry", color=color.white, style=plot.style_linebr, linewidth=1, display=chartOnly)
+
+// ------------------------- Compact entry table
+var table entryTable = table.new(position.bottom_right, 2, 3, bgcolor=color.new(color.black, 88), border_width=1, border_color=color.new(color.gray, 85))
+if barstate.islast
+    table.cell(entryTable, 0, 0, "Pro Scalper", text_color=color.white, bgcolor=color.new(color.gray, 82), text_size=size.tiny)
+    table.cell(entryTable, 1, 0, "Replica", text_color=color.yellow, bgcolor=color.new(color.gray, 82), text_size=size.tiny)
+    table.cell(entryTable, 0, 1, "Last", text_size=size.tiny)
+    table.cell(entryTable, 1, 1, lastSide, text_color=lastSide == "BUY" ? color.lime : lastSide == "SELL" ? color.red : color.gray, text_size=size.tiny)
+    table.cell(entryTable, 0, 2, "Entry", text_size=size.tiny)
+    table.cell(entryTable, 1, 2, na(lastEntry) ? "-" : str.tostring(lastEntry, format.mintick), text_size=size.tiny)
+
+// ------------------------- Alerts
+alertcondition(buySignal, "BUY", "Pro Scalper Replica BUY on {{ticker}} {{interval}} at {{close}}")
+alertcondition(sellSignal, "SELL", "Pro Scalper Replica SELL on {{ticker}} {{interval}} at {{close}}")
+alertcondition(reversalUp, "R Up", "Pro Scalper Replica bullish reversal on {{ticker}} {{interval}}")
+alertcondition(reversalDown, "R Down", "Pro Scalper Replica bearish reversal on {{ticker}} {{interval}}")
+alertcondition(tpHit, "Take Profit X", "Pro Scalper Replica take profit on {{ticker}} {{interval}}")

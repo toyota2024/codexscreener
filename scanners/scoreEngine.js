@@ -1,17 +1,27 @@
 const { clamp, round } = require('../utils/helpers');
 
 function scoreCandidate(symbol, metrics, market, config, options = {}) {
-  const long = options.buscarLongs === false ? null : buildSide('LONG', symbol, metrics, market, config);
-  const short = options.buscarShorts === false ? null : buildSide('SHORT', symbol, metrics, market, config);
-  return { long, short };
+  const diagnostics = { LONG: [], SHORT: [] };
+  const long = options.buscarLongs === false
+    ? null
+    : buildSide('LONG', symbol, metrics, market, config, diagnostics);
+  const short = options.buscarShorts === false
+    ? null
+    : buildSide('SHORT', symbol, metrics, market, config, diagnostics);
+  if (options.buscarLongs === false) diagnostics.LONG.push('LONG_BLOCKED_BY_MARKET_REGIME');
+  if (options.buscarShorts === false) diagnostics.SHORT.push('SHORT_BLOCKED_BY_MARKET_REGIME');
+  return { long, short, diagnostics };
 }
 
-function buildSide(bias, symbol, m, market, config) {
-  const entryCheck = validatePullbackEntry(bias, m);
-  if (!entryCheck.passed) return null;
+function buildSide(bias, symbol, m, market, config, diagnostics) {
+  const entryCheck = validatePullbackEntry(bias, m, config);
+  if (!entryCheck.passed) {
+    diagnostics[bias].push(entryCheck.code || 'INVALID_SUPPORT');
+    return null;
+  }
   const trend = scoreTrend(bias, m);
   const volume = scoreVolume(m);
-  const momentum = scoreMomentum(bias, m, market);
+  const momentum = scoreMomentum(bias, m, market, config);
   const structure = scoreStructure(bias, m);
   const riskReward = scoreRiskReward(bias, m, config, entryCheck.entry);
   const emaPenalty = scoreEmaDistancePenalty(m);
@@ -26,6 +36,16 @@ function buildSide(bias, symbol, m, market, config) {
     ...riskReward.reasons
   ].slice(0, 5);
   const risks = detectRisks(bias, m, market, riskReward.rr);
+  const sideCodes = [];
+  const rsValues = config.relativeStrengthMode === 'sectorPercentile'
+    ? [m.rsPercentileSector]
+    : [m.rsVsSpy20d, m.rsVsQqq20d];
+  const hasRelativeStrength = rsValues.some(value => Number.isFinite(value));
+  const relativeStrengthValid = isRelativeStrengthStrong(bias, m, config);
+  if (!hasRelativeStrength) sideCodes.push('MISSING_DATA');
+  else if (!relativeStrengthValid) sideCodes.push('RELATIVE_STRENGTH_LOW');
+  if (riskReward.rr < config.filters.minRR) sideCodes.push('RR_INSUFFICIENT');
+  diagnostics[bias].push(...sideCodes);
   return {
     ticker: symbol,
     name: m.name || '',
@@ -48,7 +68,7 @@ function buildSide(bias, symbol, m, market, config) {
       : `Encima de ${round(riskReward.stop)}`,
     targetIdea: `${round(riskReward.target)}`,
     riskReward: round(riskReward.rr, 2),
-    relativeStrength: relativeStrengthLabel(bias, m),
+    relativeStrength: relativeStrengthLabel(bias, m, config),
     volume: `${round(m.rvol, 2)}x promedio 20D`,
     risk: risks.join(' | ') || 'Riesgo normal para swing setup',
     metrics: {
@@ -63,7 +83,8 @@ function buildSide(bias, symbol, m, market, config) {
       macdHistogram: round(m.macdHistogram, 3),
       atr14: round(m.atr14),
       atrPct: round((m.atr14 / m.close) * 100, 2),
-      avgVolume20: Math.round(m.avgVolume20 || 0),
+      avgVolume20: Number.isFinite(m.avgVolume20) ? Math.round(m.avgVolume20) : null,
+      marketCap: Number.isFinite(m.marketCap) ? m.marketCap : null,
       rvol: round(m.rvol, 2),
       coreUniverse: Boolean(m.coreUniverse),
       reboteOpcionC: bias === 'LONG'
@@ -84,7 +105,8 @@ function buildSide(bias, symbol, m, market, config) {
       structure: structure.points,
       riskReward: riskReward.points,
       emaDistancePenalty: emaPenalty.points
-    }
+    },
+    observability: { rejectionCodes: sideCodes }
   };
 }
 
@@ -137,20 +159,20 @@ function scoreVolume(m) {
   return { points: clamp(points, 0, 25), reasons };
 }
 
-function scoreMomentum(bias, m, market) {
+function scoreMomentum(bias, m, market, config) {
   let points = 0;
   const reasons = [];
   if (bias === 'LONG') {
     if (m.rsi14 >= 50 && m.rsi14 <= 75) { points += 7; reasons.push(`RSI saludable ${round(m.rsi14, 0)}`); }
     if (m.macdHistogram > 0 && m.macd > m.macdSignal) { points += 6; reasons.push('MACD positivo'); }
-    if ((m.returns5d || 0) > 0 && (m.returns20d || 0) > 0) { points += 4; reasons.push('price strength'); }
-    if ((m.rsVsSpy20d || 0) > 0 || (m.rsVsQqq20d || 0) > 0) { points += 30; reasons.push('lidera vs SPY/QQQ'); }
+    if (Number.isFinite(m.returns5d) && Number.isFinite(m.returns20d) && m.returns5d > 0 && m.returns20d > 0) { points += 4; reasons.push('price strength'); }
+    if (isRelativeStrengthStrong('LONG', m, config)) { points += 30; reasons.push(config.relativeStrengthMode === 'sectorPercentile' ? 'percentil sectorial fuerte' : 'lidera vs SPY/QQQ'); }
     if (market.bias === 'BEARISH') points -= 3;
   } else {
     if (m.rsi14 >= 25 && m.rsi14 <= 50) { points += 7; reasons.push(`RSI debil ${round(m.rsi14, 0)}`); }
     if (m.macdHistogram < 0 && m.macd < m.macdSignal) { points += 6; reasons.push('MACD negativo'); }
-    if ((m.returns5d || 0) < 0 && (m.returns20d || 0) < 0) { points += 4; reasons.push('debilidad de precio'); }
-    if ((m.rsVsSpy20d || 0) < 0 || (m.rsVsQqq20d || 0) < 0) { points += 30; reasons.push('rezagada vs SPY/QQQ'); }
+    if (Number.isFinite(m.returns5d) && Number.isFinite(m.returns20d) && m.returns5d < 0 && m.returns20d < 0) { points += 4; reasons.push('debilidad de precio'); }
+    if (isRelativeStrengthStrong('SHORT', m, config)) { points += 30; reasons.push(config.relativeStrengthMode === 'sectorPercentile' ? 'percentil sectorial debil' : 'rezagada vs SPY/QQQ'); }
     if (market.bias === 'BULLISH') points -= 3;
   }
   return { points: clamp(points, 0, 30), reasons };
@@ -191,33 +213,33 @@ function scoreRiskReward(bias, m, config, entry) {
   return { points, rr, entry, stop, target, reasons: rr >= config.filters.minRR ? [`R:R ${round(rr, 1)}`] : [] };
 }
 
-function validatePullbackEntry(bias, m) {
+function validatePullbackEntry(bias, m, config) {
   if (!Number.isFinite(m.ema9) || !Number.isFinite(m.ema20) || !Number.isFinite(m.close)) {
-    return { passed: false, reason: 'EMA9/EMA20 no disponible' };
+    return { passed: false, code: 'MISSING_DATA', reason: 'EMA9/EMA20 no disponible' };
   }
   if (bias === 'LONG') {
     if (Number.isFinite(m.high20Prev) && m.close > m.high20Prev * 1.02) {
-      return { passed: false, reason: 'LONG extendido > high20Prev +2%' };
+      return { passed: false, code: 'EMA_DISTANCE_TOO_HIGH', reason: 'LONG extendido > high20Prev +2%' };
     }
     if (m.low <= m.ema9 && m.close >= m.ema9 * 0.995 && m.close > m.ema20) {
       return { passed: true, entry: m.ema9 * 1.01 };
     }
-    if (qualifiesMajorPullback(m)) {
+    if (qualifiesMajorPullback(m, config)) {
       return { passed: true, entry: m.ema50 * 1.01, setup: 'PULLBACK_MAYOR' };
     }
-    return { passed: false, reason: 'LONG fuera de trigger EMA9/EMA50' };
+    return { passed: false, code: 'INVALID_SUPPORT', reason: 'LONG fuera de trigger EMA9/EMA50' };
   }
   if (Number.isFinite(m.low20Prev) && m.close < m.low20Prev * 0.98) {
-    return { passed: false, reason: 'SHORT extendido < low20Prev -2%' };
+    return { passed: false, code: 'EMA_DISTANCE_TOO_HIGH', reason: 'SHORT extendido < low20Prev -2%' };
   }
   if (m.close < m.ema9 || m.close > m.ema20) {
-    return { passed: false, reason: 'SHORT fuera del canal EMA9-EMA20' };
+    return { passed: false, code: 'INVALID_SUPPORT', reason: 'SHORT fuera del canal EMA9-EMA20' };
   }
   return { passed: true, entry: m.ema9 };
 }
 
-function qualifiesMajorPullback(m) {
-  if (qualifiesLongMomentum(m)) return false;
+function qualifiesMajorPullback(m, config) {
+  if (qualifiesLongMomentum(m, config)) return false;
   if (!Number.isFinite(m.ema50) || !Number.isFinite(m.low) || !Number.isFinite(m.open) || !Number.isFinite(m.high)) {
     return false;
   }
@@ -231,11 +253,11 @@ function qualifiesMajorPullback(m) {
     m.close > m.sma200;
 }
 
-function qualifiesLongMomentum(m) {
+function qualifiesLongMomentum(m, config) {
   return (m.rsi14 >= 50 && m.rsi14 <= 75) ||
     (m.macdHistogram > 0 && m.macd > m.macdSignal) ||
-    ((m.returns5d || 0) > 0 && (m.returns20d || 0) > 0) ||
-    ((m.rsVsSpy20d || 0) > 0 || (m.rsVsQqq20d || 0) > 0);
+    (Number.isFinite(m.returns5d) && Number.isFinite(m.returns20d) && m.returns5d > 0 && m.returns20d > 0) ||
+    isRelativeStrengthStrong('LONG', m, config);
 }
 
 function detectCompression(m) {
@@ -256,10 +278,29 @@ function pickSetup(bias, structure, compression) {
   return bias === 'LONG' ? 'Trend continuation pullback' : 'Bearish continuation setup';
 }
 
-function relativeStrengthLabel(bias, m) {
-  const spy = m.rsVsSpy20d || 0;
-  const qqq = m.rsVsQqq20d || 0;
-  const avg = (spy + qqq) / 2;
+function isRelativeStrengthStrong(bias, m, config = {}) {
+  if (config.relativeStrengthMode === 'sectorPercentile') {
+    if (!Number.isFinite(m.rsPercentileSector)) return false;
+    return bias === 'LONG' ? m.rsPercentileSector >= 80 : m.rsPercentileSector < 40;
+  }
+  return bias === 'LONG'
+    ? ((Number.isFinite(m.rsVsSpy20d) && m.rsVsSpy20d > 0) || (Number.isFinite(m.rsVsQqq20d) && m.rsVsQqq20d > 0))
+    : ((Number.isFinite(m.rsVsSpy20d) && m.rsVsSpy20d < 0) || (Number.isFinite(m.rsVsQqq20d) && m.rsVsQqq20d < 0));
+}
+
+function relativeStrengthLabel(bias, m, config = {}) {
+  if (config.relativeStrengthMode === 'sectorPercentile') {
+    if (!Number.isFinite(m.rsPercentileSector)) return 'No disponible';
+    if (m.rsPercentileSector >= 80) return 'Fuerte vs sector';
+    if (m.rsPercentileSector >= 60) return 'Moderada vs sector';
+    if (m.rsPercentileSector >= 40) return 'Neutral vs sector';
+    return 'Debil vs sector';
+  }
+  const spy = Number.isFinite(m.rsVsSpy20d) ? m.rsVsSpy20d : null;
+  const qqq = Number.isFinite(m.rsVsQqq20d) ? m.rsVsQqq20d : null;
+  if (spy == null && qqq == null) return 'No disponible';
+  const values = [spy, qqq].filter(Number.isFinite);
+  const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
   if (bias === 'LONG') return avg > 2 ? 'Strong vs SPY/QQQ' : avg > 0 ? 'Slightly strong vs SPY/QQQ' : 'Weak vs SPY/QQQ';
   return avg < -2 ? 'Weak vs SPY/QQQ' : avg < 0 ? 'Slightly weak vs SPY/QQQ' : 'Not weak vs SPY/QQQ';
 }

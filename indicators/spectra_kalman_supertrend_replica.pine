@@ -1,0 +1,393 @@
+//@version=5
+indicator("SPECTRA-style Kalman Supertrend Replica", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=200)
+
+// This is an original approximation inspired by the public SPECTRA description.
+// It does not copy or recover the invite-only source code.
+
+// ------------------------- Inputs
+groupSignal = "Signal Engine"
+sens       = input.float(1.5, "Signal Sensitivity", minval=0.1, step=0.1, group=groupSignal, display=display.none)
+atrLen     = input.int(200, "Market Noise Period", minval=1, group=groupSignal, display=display.none)
+smoothQ    = input.float(0.07, "Signal Smoothing", minval=0.001, maxval=1.0, step=0.001, group=groupSignal, display=display.none)
+trailSens  = input.float(1.5, "Smart Trail Sensitivity", minval=0.1, step=0.1, group=groupSignal, display=display.none)
+rsiLen     = input.int(14, "Momentum Period", minval=1, group=groupSignal, display=display.none)
+useRsi     = input.bool(true, "Use RSI Momentum Filter", group=groupSignal, display=display.none)
+useVol     = input.bool(true, "Use Volume Strength Filter", group=groupSignal, display=display.none)
+volLen     = input.int(50, "Volume Average Period", minval=1, group=groupSignal, display=display.none)
+cooldown   = input.int(5, "Signal Cooldown", minval=0, group=groupSignal, display=display.none)
+
+groupRisk  = "Trade Management"
+slLookback = input.int(15, "Stop Loss Lookback", minval=1, group=groupRisk, display=display.none)
+slBuffer   = input.float(0.7, "Stop Loss ATR Buffer", minval=0.0, step=0.1, group=groupRisk, display=display.none)
+tpMode     = input.string("Split", "TP Mode", options=["TP1 only", "TP2 only", "Split"], group=groupRisk, display=display.none)
+earlyExit  = input.bool(true, "Early Exit On Opposite Signal In Profit", group=groupRisk, display=display.none)
+showZones  = input.bool(true, "Show TP/SL Boxes", group=groupRisk, display=display.none)
+zoneBars   = input.int(25, "TP/SL Box Projection Bars", minval=5, maxval=200, group=groupRisk, display=display.none)
+
+groupVisual = "Visuals"
+showTrail   = input.bool(true, "Show Smart Trail", group=groupVisual, display=display.none)
+showCloud   = input.bool(true, "Show Trend Cloud", group=groupVisual, display=display.none)
+colorBars   = input.bool(true, "Color Candles", group=groupVisual, display=display.none)
+showDash    = input.bool(false, "Show Dashboard", group=groupVisual, display=display.none)
+
+groupMtf = "MTF Panel"
+showMtf = input.bool(true, "Show MTF Panel", group=groupMtf, display=display.none)
+tf1 = input.timeframe("5", "Timeframe 1", group=groupMtf, display=display.none)
+tf2 = input.timeframe("15", "Timeframe 2", group=groupMtf, display=display.none)
+tf3 = input.timeframe("60", "Timeframe 3", group=groupMtf, display=display.none)
+tf4 = input.timeframe("240", "Timeframe 4", group=groupMtf, display=display.none)
+tf5 = input.timeframe("D", "Timeframe 5", group=groupMtf, display=display.none)
+tf6 = input.timeframe("W", "Timeframe 6", group=groupMtf, display=display.none)
+
+// ------------------------- Kalman pre-processing
+src = hl2
+rawAtr = ta.atr(atrLen)
+measurementNoise = 1.0
+trailPeriod = math.max(1, int(math.round(atrLen / 4.0)))
+swingLow = ta.lowest(low, slLookback)
+swingHigh = ta.highest(high, slLookback)
+
+var float kPrice = na
+var float pPrice = 1.0
+if na(kPrice)
+    kPrice := src
+else
+    pPrice += smoothQ
+    gainPrice = pPrice / (pPrice + measurementNoise)
+    kPrice += gainPrice * (src - kPrice)
+    pPrice *= 1.0 - gainPrice
+
+var float kAtr = na
+var float pAtr = 1.0
+if na(kAtr)
+    kAtr := rawAtr
+else
+    pAtr += smoothQ
+    gainAtr = pAtr / (pAtr + measurementNoise)
+    kAtr += gainAtr * (rawAtr - kAtr)
+    pAtr *= 1.0 - gainAtr
+
+// ------------------------- Kalman Supertrend
+basicUpper = kPrice + sens * kAtr
+basicLower = kPrice - sens * kAtr
+
+var float upperBand = na
+var float lowerBand = na
+upperBand := na(upperBand[1]) ? basicUpper : basicUpper < upperBand[1] or close[1] > upperBand[1] ? basicUpper : upperBand[1]
+lowerBand := na(lowerBand[1]) ? basicLower : basicLower > lowerBand[1] or close[1] < lowerBand[1] ? basicLower : lowerBand[1]
+
+var int stDir = 1
+stDir := nz(stDir[1], 1)
+stDir := stDir[1] == -1 and close > upperBand[1] ? 1 : stDir[1] == 1 and close < lowerBand[1] ? -1 : stDir
+stLine = stDir == 1 ? lowerBand : upperBand
+
+trendFlipUp = stDir == 1 and stDir[1] == -1
+trendFlipDn = stDir == -1 and stDir[1] == 1
+
+// ------------------------- Smart Trail
+trailAtr = ta.atr(trailPeriod)
+longTrailBase = close - trailSens * trailAtr
+shortTrailBase = close + trailSens * trailAtr
+
+var int trailDir = 1
+var float smartTrail = na
+prevTrail = nz(smartTrail[1], close)
+trailDir := close > prevTrail ? 1 : close < prevTrail ? -1 : nz(trailDir[1], 1)
+smartTrail := trailDir == 1 ? math.max(longTrailBase, prevTrail) : math.min(shortTrailBase, prevTrail)
+
+structureBull = close > smartTrail
+structureBear = close < smartTrail
+
+// ------------------------- Momentum and volume filters
+rsi = ta.rsi(close, rsiLen)
+rsiBull = not useRsi or (rsi > 50 and rsi > rsi[1])
+rsiBear = not useRsi or (rsi < 50 and rsi < rsi[1])
+
+volAvg = ta.sma(volume, volLen)
+strongVolume = useVol and volume > volAvg
+
+var int lastSignalBar = na
+cooldownOk = na(lastSignalBar) or bar_index - lastSignalBar >= cooldown
+
+rawBuy = trendFlipUp and structureBull and rsiBull and cooldownOk and barstate.isconfirmed
+rawSell = trendFlipDn and structureBear and rsiBear and cooldownOk and barstate.isconfirmed
+
+buyStrong = rawBuy and strongVolume
+sellStrong = rawSell and strongVolume
+buyNormal = rawBuy and not buyStrong
+sellNormal = rawSell and not sellStrong
+buySignal = buyStrong or buyNormal
+sellSignal = sellStrong or sellNormal
+
+if buySignal or sellSignal
+    lastSignalBar := bar_index
+
+// ------------------------- Trade management
+var bool active = false
+var int tradeDir = 0
+var float entry = na
+var float stop = na
+var float tp1 = na
+var float tp2 = na
+var float risk = na
+var bool tp1Done = false
+var bool tradeStrong = false
+var string tradeSide = ""
+var box profitBox = na
+var box lossBox = na
+var int boxRight = na
+
+// Stats
+var int totalTrades = 0
+var int wins = 0
+var int losses = 0
+var int breakevens = 0
+var float netR = 0.0
+var float grossWinR = 0.0
+var float grossLossR = 0.0
+var int tp1Hits = 0
+var int tp2Hits = 0
+var int slHits = 0
+var int earlyExits = 0
+
+var int strongBuyTrades = 0
+var int normalBuyTrades = 0
+var int strongSellTrades = 0
+var int normalSellTrades = 0
+var float strongBuyR = 0.0
+var float normalBuyR = 0.0
+var float strongSellR = 0.0
+var float normalSellR = 0.0
+
+closeTrade(_r, _reason) =>
+    labelColor = _r > 0 ? color.lime : _r < 0 ? color.red : color.gray
+    labelStyle = tradeDir == 1 ? label.style_label_down : label.style_label_up
+    labelY = tradeDir == 1 ? high : low
+    label.new(bar_index, labelY, _reason + "\n" + str.tostring(_r, "#.##") + "R", style=labelStyle, color=labelColor, textcolor=color.white, size=size.tiny)
+
+// Manage open trade before opening a new one.
+closed = false
+closedR = 0.0
+closedReason = ""
+
+if active
+    hitSL = tradeDir == 1 ? low <= stop : high >= stop
+    hitTP1 = tradeDir == 1 ? high >= tp1 : low <= tp1
+    hitTP2 = tradeDir == 1 ? high >= tp2 : low <= tp2
+    opposite = tradeDir == 1 ? sellSignal : buySignal
+    openR = tradeDir == 1 ? (close - entry) / risk : (entry - close) / risk
+
+    if tpMode == "TP1 only"
+        if hitTP1
+            closed := true
+            closedR := 1.0
+            closedReason := "TP1"
+            tp1Hits += 1
+        else if hitSL
+            closed := true
+            closedR := -1.0
+            closedReason := "SL"
+            slHits += 1
+    else if tpMode == "TP2 only"
+        if hitTP2
+            closed := true
+            closedR := 2.0
+            closedReason := "TP2"
+            tp2Hits += 1
+        else if hitSL
+            closed := true
+            closedR := -1.0
+            closedReason := "SL"
+            slHits += 1
+    else
+        if hitTP1 and not tp1Done
+            tp1Done := true
+            tp1Hits += 1
+        if hitTP2
+            closed := true
+            closedR := tp1Done ? 1.5 : 1.5
+            closedReason := "TP2"
+            tp2Hits += 1
+        else if hitSL
+            closed := true
+            closedR := tp1Done ? 0.0 : -1.0
+            closedReason := tp1Done ? "TP1+SL" : "SL"
+            slHits += 1
+
+    if not closed and earlyExit and opposite and openR >= 0
+        closed := true
+        closedR := tpMode == "Split" and tp1Done ? 0.5 + openR * 0.5 : openR
+        closedReason := "Early Exit"
+        earlyExits += 1
+
+if closed
+    active := false
+    totalTrades += 1
+    netR += closedR
+    if closedR > 0
+        wins += 1
+        grossWinR += closedR
+    else if closedR < 0
+        losses += 1
+        grossLossR += math.abs(closedR)
+    else
+        breakevens += 1
+
+    if tradeSide == "BUY" and tradeStrong
+        strongBuyTrades += 1
+        strongBuyR += closedR
+    else if tradeSide == "BUY"
+        normalBuyTrades += 1
+        normalBuyR += closedR
+    else if tradeSide == "SELL" and tradeStrong
+        strongSellTrades += 1
+        strongSellR += closedR
+    else
+        normalSellTrades += 1
+        normalSellR += closedR
+
+    closeTrade(closedR, closedReason)
+
+// Open new trade.
+canOpen = not active
+if canOpen and (buySignal or sellSignal)
+    tradeDir := buySignal ? 1 : -1
+    tradeSide := buySignal ? "BUY" : "SELL"
+    tradeStrong := buyStrong or sellStrong
+    entry := close
+    stop := tradeDir == 1 ? swingLow - slBuffer * rawAtr : swingHigh + slBuffer * rawAtr
+    risk := math.abs(entry - stop)
+    if risk > syminfo.mintick
+        tp1 := tradeDir == 1 ? entry + risk : entry - risk
+        tp2 := tradeDir == 1 ? entry + 2.0 * risk : entry - 2.0 * risk
+        active := true
+        tp1Done := false
+        if showZones
+            box.delete(profitBox)
+            box.delete(lossBox)
+            profitTop = tradeDir == 1 ? tp2 : entry
+            profitBot = tradeDir == 1 ? entry : tp2
+            lossTop = tradeDir == 1 ? entry : stop
+            lossBot = tradeDir == 1 ? stop : entry
+            boxRight := bar_index + zoneBars
+            profitBox := box.new(bar_index, profitTop, bar_index + 1, profitBot, bgcolor=color.new(color.lime, 97), border_color=color.new(color.lime, 94))
+            lossBox := box.new(bar_index, lossTop, bar_index + 1, lossBot, bgcolor=color.new(color.red, 97), border_color=color.new(color.red, 94))
+
+if active and showZones and not na(profitBox) and not na(lossBox)
+    nextRight = math.min(bar_index + 1, boxRight)
+    box.set_right(profitBox, nextRight)
+    box.set_right(lossBox, nextRight)
+
+// ------------------------- Plots
+chartOnly = display.all - display.status_line - display.price_scale
+
+plot(stLine, "Kalman Supertrend", color=stDir == 1 ? color.lime : color.red, linewidth=2, display=chartOnly)
+plot(showTrail ? smartTrail : na, "Smart Trail", color=trailDir == 1 ? color.new(color.lime, 0) : color.new(color.red, 0), linewidth=2, display=chartOnly)
+
+plot(active ? entry : na, "Entry", color=color.white, style=plot.style_linebr, linewidth=1, display=chartOnly)
+plot(active ? stop : na, "Stop Loss", color=color.red, style=plot.style_linebr, linewidth=2, display=chartOnly)
+plot(active ? tp1 : na, "TP1", color=color.lime, style=plot.style_linebr, linewidth=1, display=chartOnly)
+plot(active ? tp2 : na, "TP2", color=color.green, style=plot.style_linebr, linewidth=2, display=chartOnly)
+
+fastEma = ta.ema(close, 21)
+slowEma = ta.ema(close, 55)
+cloudSpread = ta.atr(21) * 0.15
+pFast = plot(showCloud ? fastEma + cloudSpread : na, "Fast Cloud", color=color.new(color.teal, 100), display=chartOnly)
+pSlow = plot(showCloud ? slowEma - cloudSpread : na, "Slow Cloud", color=color.new(color.orange, 100), display=chartOnly)
+fill(pFast, pSlow, color=fastEma >= slowEma ? color.new(color.lime, 86) : color.new(color.red, 86), title="Trend Cloud")
+
+barcolor(colorBars ? stDir == 1 ? color.new(color.lime, 0) : color.new(color.red, 0) : na)
+
+plotshape(buyNormal, "BUY", style=shape.labelup, location=location.belowbar, color=color.lime, text="BUY", textcolor=color.black, size=size.small, display=chartOnly)
+plotshape(buyStrong, "BUY+", style=shape.labelup, location=location.belowbar, color=color.green, text="BUY+", textcolor=color.white, size=size.small, display=chartOnly)
+plotshape(sellNormal, "SELL", style=shape.labeldown, location=location.abovebar, color=color.red, text="SELL", textcolor=color.white, size=size.small, display=chartOnly)
+plotshape(sellStrong, "SELL+", style=shape.labeldown, location=location.abovebar, color=color.maroon, text="SELL+", textcolor=color.white, size=size.small, display=chartOnly)
+
+// ------------------------- Dashboard
+trendStrength = (ta.ema(close, 21) - ta.ema(close, 55)) / math.max(rawAtr, syminfo.mintick)
+marketCond = math.abs(trendStrength) > 0.35 ? "Trending" : "Ranging"
+volatilityPct = rawAtr / close * 100.0
+bullVol = close >= open ? volume : 0.0
+bearVol = close < open ? volume : 0.0
+volSent = ta.sma(bullVol, volLen) >= ta.sma(bearVol, volLen) ? "Bull Vol" : "Bear Vol"
+pf = grossLossR > 0 ? grossWinR / grossLossR : na
+winRate = totalTrades > 0 ? wins / totalTrades * 100.0 : na
+
+var table dash = table.new(position.bottom_left, 2, 9, bgcolor=color.new(color.black, 88), border_width=1, border_color=color.new(color.gray, 85))
+if showDash and barstate.islast
+    table.cell(dash, 0, 0, "Metric", bgcolor=color.new(color.gray, 82), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 0, "Value", bgcolor=color.new(color.gray, 82), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 1, "Trend", text_size=size.tiny)
+    table.cell(dash, 1, 1, stDir == 1 ? "Bull" : "Bear", text_color=stDir == 1 ? color.lime : color.red, text_size=size.tiny)
+    table.cell(dash, 0, 2, "Strength", text_size=size.tiny)
+    table.cell(dash, 1, 2, str.tostring(trendStrength, "#.##"), text_size=size.tiny)
+    table.cell(dash, 0, 3, "Condition", text_size=size.tiny)
+    table.cell(dash, 1, 3, marketCond, text_size=size.tiny)
+    table.cell(dash, 0, 4, "ATR %", text_size=size.tiny)
+    table.cell(dash, 1, 4, str.tostring(volatilityPct, "#.##") + "%", text_size=size.tiny)
+    table.cell(dash, 0, 5, "Volume", text_size=size.tiny)
+    table.cell(dash, 1, 5, volSent, text_size=size.tiny)
+    table.cell(dash, 0, 6, "RSI", text_size=size.tiny)
+    table.cell(dash, 1, 6, str.tostring(rsi, "#.0"), text_size=size.tiny)
+    table.cell(dash, 0, 7, "Trade", text_size=size.tiny)
+    table.cell(dash, 1, 7, active ? tradeSide : "Flat", text_size=size.tiny)
+    table.cell(dash, 0, 8, "WR / PF", text_size=size.tiny)
+    table.cell(dash, 1, 8, str.tostring(winRate, "#.0") + "% / " + str.tostring(pf, "#.##"), text_size=size.tiny)
+
+// ------------------------- MTF panel
+mtfBull(tf) =>
+    request.security(syminfo.tickerid, tf, close[1] > ta.ema(close, 55)[1], lookahead=barmerge.lookahead_on)
+
+mtfStrength(tf) =>
+    request.security(syminfo.tickerid, tf, ((ta.ema(close, 21)[1] - ta.ema(close, 55)[1]) / math.max(ta.atr(atrLen)[1], syminfo.mintick)), lookahead=barmerge.lookahead_on)
+
+b1 = mtfBull(tf1)
+b2 = mtfBull(tf2)
+b3 = mtfBull(tf3)
+b4 = mtfBull(tf4)
+b5 = mtfBull(tf5)
+b6 = mtfBull(tf6)
+s1 = mtfStrength(tf1)
+s2 = mtfStrength(tf2)
+s3 = mtfStrength(tf3)
+s4 = mtfStrength(tf4)
+s5 = mtfStrength(tf5)
+s6 = mtfStrength(tf6)
+bullCount = (b1 ? 1 : 0) + (b2 ? 1 : 0) + (b3 ? 1 : 0) + (b4 ? 1 : 0) + (b5 ? 1 : 0) + (b6 ? 1 : 0)
+
+var table mtf = table.new(position.bottom_right, 3, 8, bgcolor=color.new(color.black, 90), border_width=1, border_color=color.new(color.gray, 88))
+mtfRow(row, tf, bull, strength) =>
+    table.cell(mtf, 0, row, tf, text_size=size.tiny)
+    table.cell(mtf, 1, row, bull ? "Bull" : "Bear", text_color=bull ? color.lime : color.red, text_size=size.tiny)
+    table.cell(mtf, 2, row, math.abs(strength) > 0.35 ? "Strong" : "Range", text_size=size.tiny)
+
+if showMtf and barstate.islast
+    table.cell(mtf, 0, 0, "TF", bgcolor=color.new(color.gray, 84), text_color=color.white, text_size=size.tiny)
+    table.cell(mtf, 1, 0, "Bias", bgcolor=color.new(color.gray, 84), text_color=color.white, text_size=size.tiny)
+    table.cell(mtf, 2, 0, "State", bgcolor=color.new(color.gray, 84), text_color=color.white, text_size=size.tiny)
+    mtfRow(1, tf1, b1, s1)
+    mtfRow(2, tf2, b2, s2)
+    mtfRow(3, tf3, b3, s3)
+    mtfRow(4, tf4, b4, s4)
+    mtfRow(5, tf5, b5, s5)
+    mtfRow(6, tf6, b6, s6)
+    consensus = bullCount >= 5 ? "Strong Bull" : bullCount >= 4 ? "Bull Bias" : bullCount <= 1 ? "Strong Bear" : bullCount <= 2 ? "Bear Bias" : "Mixed"
+    table.cell(mtf, 0, 7, "Consensus", text_size=size.tiny)
+    table.cell(mtf, 1, 7, str.tostring(bullCount) + "/6", text_size=size.tiny)
+    table.cell(mtf, 2, 7, consensus, text_size=size.tiny)
+
+// ------------------------- Alerts
+alertcondition(buyStrong, "Strong BUY+", "Strong BUY+ on {{ticker}} {{interval}} at {{close}}")
+alertcondition(buyNormal, "BUY", "BUY on {{ticker}} {{interval}} at {{close}}")
+alertcondition(sellStrong, "Strong SELL+", "Strong SELL+ on {{ticker}} {{interval}} at {{close}}")
+alertcondition(sellNormal, "SELL", "SELL on {{ticker}} {{interval}} at {{close}}")
+alertcondition(buySignal, "Any BUY", "Any BUY on {{ticker}} {{interval}} at {{close}}")
+alertcondition(sellSignal, "Any SELL", "Any SELL on {{ticker}} {{interval}} at {{close}}")
+alertcondition(buySignal or sellSignal, "Any Signal", "Any signal on {{ticker}} {{interval}} at {{close}}")
+alertcondition(closed and closedReason == "TP1", "TP1 Hit", "TP1 hit on {{ticker}} {{interval}}")
+alertcondition(closed and closedReason == "TP2", "TP2 Hit", "TP2 hit on {{ticker}} {{interval}}")
+alertcondition(closed and str.contains(closedReason, "SL"), "Stop Loss Hit", "Stop Loss hit on {{ticker}} {{interval}}")
+alertcondition(closed, "Trade Closed", "Trade closed on {{ticker}} {{interval}}")
+alertcondition(closed and closedReason == "Early Exit", "Early Exit", "Early exit on {{ticker}} {{interval}}")
+alertcondition(earlyExit and active and ((tradeDir == 1 and sellSignal) or (tradeDir == -1 and buySignal)), "Exit and Reverse", "Opposite signal on {{ticker}} {{interval}}")
+alertcondition(buySignal or sellSignal or closed, "Any Trade Event", "Trade event on {{ticker}} {{interval}}")

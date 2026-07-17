@@ -4,19 +4,25 @@ const { readJson, writeJson, round } = require('../utils/helpers');
 const ROOT = path.join(__dirname, '..');
 const HISTORY_PATH = path.join(ROOT, 'data', 'scan-history.json');
 
-function updateScanHistory(scanResult, config) {
-  const history = readJson(HISTORY_PATH, { records: [] });
+function updateScanHistory(scanResult, config, historyPath = HISTORY_PATH) {
+  const history = readJson(historyPath, { records: [] });
   const records = Array.isArray(history.records) ? history.records : [];
   const scans = Array.isArray(history.scans) ? history.scans : [];
   const scanTs = Date.parse(scanResult.timestamp);
   const windowMs = (config.history?.dedupeWindowMinutes || 60) * 60 * 1000;
   const validationWindows = config.history?.validationWindowsDays || [5, 15, 30];
   const neutralBand = config.history?.neutralBandPct || 2;
-  const candidates = [
-    ...(scanResult.longCandidates || []).map(candidate => ({ candidate, historyType: 'LONG' })),
-    ...(scanResult.shortCandidates || []).map(candidate => ({ candidate, historyType: 'SHORT' })),
-    ...(scanResult.monitoringCandidates || []).map(candidate => ({ candidate, historyType: 'MONITOR' }))
-  ];
+  const historyCandidates = Array.isArray(scanResult.historyCandidates)
+    ? scanResult.historyCandidates
+    : [
+      ...(scanResult.longCandidates || []),
+      ...(scanResult.shortCandidates || []),
+      ...(scanResult.monitoringCandidates || [])
+    ];
+  const candidates = historyCandidates.map(candidate => ({
+    candidate,
+    historyType: candidate.bias === 'SHORT' ? 'SHORT' : candidate.bias === 'LONG' ? 'LONG' : 'MONITOR'
+  }));
 
   const candidateKeys = [];
   const updatedRecordKeysThisScan = new Set();
@@ -46,17 +52,24 @@ function updateScanHistory(scanResult, config) {
     key: scanKey,
     timestamp: scanResult.timestamp,
     marketBias: scanResult.market?.bias || 'NEUTRAL',
-    candidateKeys
+    universeSymbols: Array.isArray(scanResult.universeSymbols) ? scanResult.universeSymbols : [],
+    candidateKeys,
+    candidatePoolSize: candidates.length,
+    topCandidateCount: (scanResult.longCandidates || []).length +
+      (scanResult.shortCandidates || []).length,
+    reportedCandidateCount: (scanResult.longCandidates || []).length +
+      (scanResult.shortCandidates || []).length + (scanResult.monitoringCandidates || []).length
   };
   if (existingScan) {
     existingScan.timestamp = scanResult.timestamp;
     existingScan.marketBias = scanPayload.marketBias;
+    existingScan.universeSymbols = scanPayload.universeSymbols;
     existingScan.candidateKeys = candidateKeys;
   } else {
     scans.push(scanPayload);
   }
 
-  validateRecords(records, scanResult, validationWindows, neutralBand);
+  validateRecords(records, scanResult, validationWindows, neutralBand, scanResult.validationSeries || {});
   history.records = records
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
     .slice(0, 1000);
@@ -64,7 +77,7 @@ function updateScanHistory(scanResult, config) {
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
     .slice(0, 250);
   history.updatedAt = scanResult.timestamp;
-  writeJson(HISTORY_PATH, history);
+  writeJson(historyPath, history);
   return history;
 }
 
@@ -170,6 +183,8 @@ function buildRecord(candidate, scanResult, key, validationWindows, historyType)
     score: candidate.score,
     riskReward: candidate.riskReward ?? null,
     setup: candidate.setup,
+    setupCategory: classifySetup(candidate.setup),
+    capCategory: classifyCap(candidate.metrics?.marketCap),
     entryPrice: candidate.entryPrice ?? candidate.metrics?.price ?? null,
     stopPrice: candidate.stopPrice ?? null,
     targetPrice: candidate.targetPrice ?? null,
@@ -209,7 +224,7 @@ function calculateWinRate(records, neutralBand = 2) {
     if (!summary[type]) continue;
     for (const window of windows) {
       const validation = record.validations?.[window];
-      if (!validation) continue;
+      if (!validation || classifyValidation(validation) !== 'COMPLETE') continue;
       let result = validation.candidateReturnPct;
       if (!Number.isFinite(result) && Number.isFinite(validation.directionalReturnPct)) {
         result = record.bias === 'SHORT' ? -validation.directionalReturnPct : validation.directionalReturnPct;
@@ -228,7 +243,60 @@ function calculateWinRate(records, neutralBand = 2) {
       cell.winRate = cell.total ? round((cell.wins / cell.total) * 100, 1) : null;
     }
   }
+  summary.segments = {
+    setup: calculateSegmentSummary(firstRecordByTicker.values(), 'setupCategory', neutralBand),
+    cap: calculateSegmentSummary(firstRecordByTicker.values(), 'capCategory', neutralBand),
+    bias: calculateSegmentSummary(firstRecordByTicker.values(), 'bias', neutralBand)
+  };
+  summary.sampleStatusCounts = countSampleStatuses(records);
   return summary;
+}
+
+function classifyValidation(validation) {
+  if (!validation || !Number.isFinite(validation.excursionBars)) return 'INSUFFICIENT_SAMPLE';
+  if (validation.excursionBars >= 5) return 'COMPLETE';
+  if (validation.excursionBars > 0) return 'PARTIAL';
+  return 'INSUFFICIENT_SAMPLE';
+}
+
+function countSampleStatuses(records) {
+  const counts = Object.fromEntries(['5D', '15D', '30D'].map(window => [window, {
+    COMPLETE: 0,
+    PARTIAL: 0,
+    INSUFFICIENT_SAMPLE: 0
+  }]));
+  for (const record of records) {
+    for (const window of Object.keys(counts)) {
+      counts[window][classifyValidation(record.validations?.[window])]++;
+    }
+  }
+  return counts;
+}
+
+function calculateSegmentSummary(records, field, neutralBand) {
+  const result = {};
+  for (const record of records) {
+    const key = record[field] || 'UNKNOWN';
+    result[key] ||= Object.fromEntries(['5D', '15D', '30D'].map(window => [window, { wins: 0, losses: 0, total: 0, winRate: null }]));
+    for (const window of ['5D', '15D', '30D']) {
+      const validation = record.validations?.[window];
+      if (!validation || classifyValidation(validation) !== 'COMPLETE') continue;
+      const value = Number.isFinite(validation.candidateReturnPct)
+        ? validation.candidateReturnPct
+        : validation.directionalReturnPct;
+      if (!Number.isFinite(value) || Math.abs(value) <= neutralBand) continue;
+      const win = record.bias === 'SHORT' ? value < -neutralBand : value > neutralBand;
+      if (win) result[key][window].wins++;
+      else result[key][window].losses++;
+    }
+  }
+  for (const cells of Object.values(result)) {
+    for (const cell of Object.values(cells)) {
+      cell.total = cell.wins + cell.losses;
+      cell.winRate = cell.total ? round((cell.wins / cell.total) * 100, 1) : null;
+    }
+  }
+  return result;
 }
 
 function readHistoryEntries() {
@@ -272,6 +340,8 @@ function readHistoryEntries() {
 
 function toUiCandidate(record) {
   const result = days => record.validations?.[`${days}D`]?.directionalReturnPct ?? null;
+  const excursion = days => record.validations?.[`${days}D`] || {};
+  const status = days => classifyValidation(record.validations?.[`${days}D`]);
   return {
     ticker: record.ticker,
     nombre: record.name || '',
@@ -280,13 +350,24 @@ function toUiCandidate(record) {
     riskReward: record.riskReward ?? null,
     entrada: record.entryPrice,
     setup: record.setup || '',
+    setupCategory: record.setupCategory || 'UNKNOWN',
+    capCategory: record.capCategory || 'UNKNOWN',
     resultado_5d: result(5),
     resultado_15d: result(15),
-    resultado_30d: result(30)
+    resultado_30d: result(30),
+    mae_5d: excursion(5).maePct ?? null,
+    mfe_5d: excursion(5).mfePct ?? null,
+    mae_15d: excursion(15).maePct ?? null,
+    mfe_15d: excursion(15).mfePct ?? null,
+    mae_30d: excursion(30).maePct ?? null,
+    mfe_30d: excursion(30).mfePct ?? null,
+    sampleStatus_5d: status(5),
+    sampleStatus_15d: status(15),
+    sampleStatus_30d: status(30)
   };
 }
 
-function validateRecords(records, scanResult, validationWindows, neutralBand) {
+function validateRecords(records, scanResult, validationWindows, neutralBand, validationSeries) {
   const current = new Map();
   for (const item of scanResult.validationPrices || []) {
     current.set(item.ticker, item.price);
@@ -296,25 +377,73 @@ function validateRecords(records, scanResult, validationWindows, neutralBand) {
   for (const record of records) {
     const ageDays = (now - Date.parse(record.timestamp)) / 86400000;
     const price = current.get(record.ticker);
-    if (!price || !record.entryPrice) continue;
+    if (price == null || record.entryPrice == null) continue;
     for (const days of validationWindows) {
       if (ageDays < days) continue;
       const key = `${days}D`;
-      if (record.validations?.[key]) continue;
+      const existing = record.validations?.[key];
+      const series = validationSeries[record.ticker] || [];
+      const excursion = calculateExcursion(record, series, days);
+      if (existing && !excursion) continue;
       const candidateReturn = ((price - record.entryPrice) / record.entryPrice) * 100;
       const directionalReturn = record.bias === 'SHORT' ? -candidateReturn : candidateReturn;
       const spyReturn = record.spyPriceAtScan && spyPrice ? ((spyPrice - record.spyPriceAtScan) / record.spyPriceAtScan) * 100 : null;
       const alpha = spyReturn == null ? null : directionalReturn - spyReturn;
       record.validations[key] = {
+        ...(existing || {}),
         candidateReturnPct: round(candidateReturn, 2),
         directionalReturnPct: round(directionalReturn, 2),
         spyReturnPct: round(spyReturn, 2),
         alphaPct: round(alpha, 2),
         outcome: Math.abs(directionalReturn) <= neutralBand ? 'NEUTRAL' : directionalReturn > 0 ? 'WIN' : 'LOSS',
-        validatedAt: scanResult.timestamp
+        validatedAt: scanResult.timestamp,
+        sampleStatus: classifyValidation(excursion),
+        expectedBars: 5,
+        ...(excursion || {})
       };
     }
   }
+}
+
+function calculateExcursion(record, series, days) {
+  if (!Array.isArray(series) || !series.length || record.entryPrice == null) return null;
+  const start = Date.parse(record.timestamp);
+  if (!Number.isFinite(start)) return null;
+  const end = start + days * 86400000;
+  const candles = series.filter(c => {
+    const ts = Date.parse(c.date);
+    return Number.isFinite(ts) && ts >= start && ts <= end &&
+      Number.isFinite(c.high) && Number.isFinite(c.low);
+  });
+  if (!candles.length) return null;
+  const entry = Number(record.entryPrice);
+  if (!Number.isFinite(entry) || entry === 0) return null;
+  const directional = record.bias === 'SHORT'
+    ? candles.map(c => ({ favorable: ((entry - c.low) / entry) * 100, adverse: ((entry - c.high) / entry) * 100 }))
+    : candles.map(c => ({ favorable: ((c.high - entry) / entry) * 100, adverse: ((c.low - entry) / entry) * 100 }));
+  return {
+    maePct: round(Math.min(...directional.map(x => x.adverse)), 2),
+    mfePct: round(Math.max(...directional.map(x => x.favorable)), 2),
+    excursionBars: candles.length,
+    sampleStatus: candles.length >= 5 ? 'COMPLETE' : 'PARTIAL'
+  };
+}
+
+function classifySetup(setup) {
+  const value = normalizeSetup(setup);
+  if (!value) return 'UNKNOWN';
+  if (value.includes('breakout') || value.includes('breakdown')) return 'breakout';
+  if (value.includes('reversal') || value.includes('rebote')) return 'reversal';
+  if (value.includes('pullback')) return 'pullback';
+  if (value.includes('continuation') || value.includes('compression') || value.includes('momentum')) return 'momentum';
+  return 'UNKNOWN';
+}
+
+function classifyCap(marketCap) {
+  if (!Number.isFinite(marketCap)) return 'UNKNOWN';
+  if (marketCap >= 10e9) return 'large_cap';
+  if (marketCap >= 2e9) return 'mid_cap';
+  return 'small_cap';
 }
 
 function getSpyWeeklyState(value) {
@@ -324,4 +453,4 @@ function getSpyWeeklyState(value) {
   return 'FLAT';
 }
 
-module.exports = { updateScanHistory, readHistoryEntries, readWinRateSummary, calculateWinRate };
+module.exports = { updateScanHistory, readHistoryEntries, readWinRateSummary, calculateWinRate, calculateExcursion };

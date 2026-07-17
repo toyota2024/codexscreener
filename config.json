@@ -10,6 +10,11 @@
     "historyInterval": "1d",
     "requestConcurrency": 6
   },
+  "shadow": {
+    "enabled": true,
+    "minimumCompleteMarketDays": 30,
+    "minimumCompleteWindows": 20
+  },
   "history": {
     "dedupeWindowMinutes": 60,
     "extendedDedupeWindowHours": 48,

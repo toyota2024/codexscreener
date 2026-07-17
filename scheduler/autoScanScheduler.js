@@ -77,8 +77,49 @@ function createAutoScanScheduler(options) {
     return memory.autoScanRuns[key];
   }
 
+  async function reportMissedSlots(date) {
+    const parts = getZonedParts(date, autoConfig.timeZone);
+    if (!WEEKDAYS.has(parts.weekday)) return;
+    const windowMinutes = autoConfig.retryWindowMinutes || 30;
+    const memory = loadMemory();
+    for (const slot of autoConfig.slots || []) {
+      const slotMinutes = slot.hour * 60 + slot.minute;
+      const elapsedMinutes = parts.minutes - slotMinutes;
+      if (elapsedMinutes <= windowMinutes) continue;
+      const key = `${parts.dateKey}:${slot.id}`;
+      const previous = memory.autoScanRuns?.[key];
+      if (previous?.status === 'sent' || previous?.status === 'missed') continue;
+      updateRun(key, {
+        status: 'missed',
+        label: slot.label,
+        missedAt: date.toISOString(),
+        lastError: previous?.lastError || 'No se ejecutó dentro de la ventana programada'
+      }, date.getTime());
+      log('warn', 'Scheduled scan missed', {
+        slot: slot.id,
+        label: slot.label,
+        scheduledDate: parts.dateKey,
+        retryWindowMinutes: windowMinutes
+      });
+      try {
+        await sendText(
+          `⚠️ <b>Screener IC: scan programado omitido</b>\n` +
+          `Slot: ${slot.label}\n` +
+          `Fecha: ${parts.dateKey}\n` +
+          `No se ejecutó dentro de la ventana de ${windowMinutes} minutos.`
+        );
+      } catch (error) {
+        log('error', 'Missed scan Telegram notification failed', {
+          slot: slot.id,
+          error: error.message
+        });
+      }
+    }
+  }
+
   async function tick(date = now()) {
     if (!autoConfig.enabled) return { status: 'disabled' };
+    await reportMissedSlots(date);
     const slot = findEligibleSlot(date, autoConfig);
     if (!slot) return { status: 'outside-window' };
     if (activeSlots.has(slot.key)) return { status: 'running', key: slot.key };
