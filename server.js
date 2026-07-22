@@ -1,10 +1,10 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { httpsJson } = require('./utils/http');
 const { readJson, writeJson, round } = require('./utils/helpers');
 const { log } = require('./utils/logger');
 const { runScan } = require('./scanners/scanEngine');
+const { getLatestPrice } = require('./providers/alpaca');
 const { readHistoryEntries, readWinRateSummary } = require('./scanners/historyStore');
 const {
   sendCandidates,
@@ -88,9 +88,8 @@ function saveHistoryEntry(result) {
 
 async function fetchCurrentPrice(symbol) {
   try {
-    const data = await httpsJson('query1.finance.yahoo.com',
-      `/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d&includePrePost=false`);
-    return data?.chart?.result?.[0]?.meta?.regularMarketPrice || null;
+    const price = await getLatestPrice(symbol);
+    return Number.isFinite(price) ? price : null;
   } catch {
     return null;
   }
@@ -236,15 +235,6 @@ async function handle(req, res) {
     if (url.pathname === '/api/update-results') {
       const result = await updateHistoryResults();
       return sendJson(res, 200, result);
-    }
-
-    if (url.pathname === '/yahoo' || url.pathname.startsWith('/yahoo/')) {
-      const yahooPath = url.pathname === '/yahoo'
-        ? url.searchParams.get('path')
-        : url.pathname.replace(/^\/yahoo/, '') + url.search;
-      if (!yahooPath) return sendJson(res, 400, { error: 'Missing Yahoo path' });
-      const data = await httpsJson('query1.finance.yahoo.com', yahooPath);
-      return sendJson(res, 200, data);
     }
 
     return serveFile(res, path.join(ROOT, url.pathname.replace(/^\/+/, '')));

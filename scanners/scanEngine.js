@@ -1,6 +1,4 @@
 const path = require('path');
-const { httpsJson } = require('../utils/http');
-const { withCache } = require('../utils/cache');
 const { readLines, uniq, round, writeJson, readJson } = require('../utils/helpers');
 const { log } = require('../utils/logger');
 const { enrichCandles } = require('./indicators');
@@ -9,6 +7,13 @@ const { scoreCandidate } = require('./scoreEngine');
 const { detectMarketRegime } = require('./marketRegime');
 const { getMarketSession } = require('../utils/marketHours');
 const { updateScanHistory } = require('./historyStore');
+const {
+  getHistoricalBars,
+  getLatestPrice,
+  getAssetName,
+  getCloseAtDate,
+  getBarsInRange
+} = require('../providers/alpaca');
 
 const ROOT = path.join(__dirname, '..');
 const SECTOR_ETFS = {
@@ -251,7 +256,22 @@ async function runScan(config, options = {}) {
     disclaimer: 'Este screener genera candidatos para analisis manual y educativo. No constituye recomendacion financiera.'
   };
 
-  const history = options.writeHistory === false ? { records: [], updatedAt: result.timestamp } : updateScanHistory(result, config, options.historyPath);
+  if (options.writeHistory !== false) {
+    const { windowPrices, windowSeries } = await fetchWindowPrices(
+      options.historyPath,
+      config.history?.validationWindowsDays || [5, 15, 30],
+      new Date(result.timestamp)
+    );
+    if (windowPrices.size > 0) {
+      result.windowValidationPrices = Object.fromEntries(windowPrices);
+    }
+    if (windowSeries.size > 0) {
+      result.windowValidationSeries = Object.fromEntries(windowSeries);
+    }
+  }
+  const history = options.writeHistory === false
+    ? { records: [], updatedAt: result.timestamp }
+    : updateScanHistory(result, config, options.historyPath);
   result.history = {
     records: history.records.length,
     updatedAt: history.updatedAt
@@ -332,7 +352,7 @@ function preferredScoreSort(a, b) {
 }
 
 async function buildUniverse(config, errors) {
-  const movers = await loadYahooMovers(config, errors);
+  const movers = await loadMovers(config, errors);
   const staticUniverse = [
     ...readLines(path.join(ROOT, 'universes', 'nasdaq100.txt')),
     ...readLines(path.join(ROOT, 'universes', 'sp500.txt')),
@@ -344,30 +364,9 @@ async function buildUniverse(config, errors) {
     .slice(0, config.scan.maxUniverseSize);
 }
 
-async function loadYahooMovers(config, errors) {
-  const scrIds = ['day_gainers', 'day_losers', 'most_actives'];
-  const symbols = [];
-  for (const id of scrIds) {
-    try {
-      const pathName = `/v1/finance/screener/predefined/saved?scrIds=${id}&count=30`;
-      const { value } = await withCache(`movers:${id}`, config.cacheTtlSeconds.movers, () =>
-        httpsJson('query1.finance.yahoo.com', pathName)
-      );
-      const quotes = value?.finance?.result?.[0]?.quotes || [];
-      symbols.push(...quotes.map(q => q.symbol));
-    } catch (error) {
-      errors.push({ source: `yahoo:${id}`, error: error.message });
-    }
-  }
-  try {
-    const { value } = await withCache('movers:trending', config.cacheTtlSeconds.movers, () =>
-      httpsJson('query1.finance.yahoo.com', '/v1/finance/trending/US?count=30')
-    );
-    symbols.push(...(value?.finance?.result?.[0]?.quotes || []).map(q => q.symbol));
-  } catch (error) {
-    errors.push({ source: 'yahoo:trending', error: error.message });
-  }
-  return uniq(symbols).filter(symbol => /^[A-Z.-]{1,8}$/.test(symbol));
+async function loadMovers(config, errors) {
+  // Movers desactivados - universo estático suficiente.
+  return [];
 }
 
 async function loadIndexMetrics(config, errors) {
@@ -391,20 +390,7 @@ async function loadSymbolMetrics(symbol, config) {
 }
 
 async function loadSymbolProfile(symbol, config) {
-  try {
-    const ttl = config.cacheTtlSeconds.profile || 86400;
-    const pathName = `/v1/finance/search?q=${encodeURIComponent(symbol)}&quotesCount=5&newsCount=0`;
-    const { value } = await withCache(`profile:${symbol}`, ttl, () =>
-      httpsJson('query1.finance.yahoo.com', pathName)
-    );
-    const quote = (value?.quotes || []).find(item => item.symbol === symbol) || value?.quotes?.[0] || {};
-    return {
-      sector: normalizeSector(quote.sector || quote.sectorDisp || ''),
-      marketCap: Number.isFinite(quote.marketCap) ? quote.marketCap : null
-    };
-  } catch {
-    return { sector: '', marketCap: null };
-  }
+  return { sector: '', marketCap: null };
 }
 
 async function loadSectorContext(sector, config, cache) {
@@ -541,32 +527,67 @@ function mergeVariantConfig(base, patch) {
 }
 
 async function loadHistory(symbol, config) {
-  const urlPath = `/v8/finance/chart/${encodeURIComponent(symbol)}?range=${config.scan.historyRange}&interval=${config.scan.historyInterval}&includePrePost=false&events=div%2Csplits`;
-  const { value } = await withCache(`chart:${symbol}:${config.scan.historyRange}:${config.scan.historyInterval}`, config.cacheTtlSeconds.chart, () =>
-    httpsJson('query1.finance.yahoo.com', urlPath)
-  );
-  const result = value?.chart?.result?.[0];
-  const quote = result?.indicators?.quote?.[0];
-  const adjClose = result?.indicators?.adjclose?.[0]?.adjclose || [];
-  const timestamps = result?.timestamp || [];
-  if (!result || !quote || !timestamps.length) throw new Error('Yahoo chart sin datos');
-  const candles = timestamps.map((ts, i) => ({
-    date: new Date(ts * 1000).toISOString().slice(0, 10),
-    ...adjustedOhlc(quote, adjClose, i),
-    volume: quote.volume?.[i]
-  })).filter(c =>
-    Number.isFinite(c.open) &&
-    Number.isFinite(c.high) &&
-    Number.isFinite(c.low) &&
-    Number.isFinite(c.close) &&
-    Number.isFinite(c.volume)
-  );
+  const historyRange = config.scan.historyRange;
+  const rangeDays = Number.isFinite(historyRange)
+    ? historyRange
+    : ({ '1y': 365, '6mo': 180, '3mo': 90 }[historyRange] || 365);
+  const { candles, name } = await getHistoricalBars(symbol, rangeDays);
   if (candles.length < 30) throw new Error('historial insuficiente');
-  const meta = result.meta || {};
-  return {
-    candles,
-    name: meta.longName || meta.shortName || meta.displayName || ''
-  };
+  return { candles, name };
+}
+
+async function fetchWindowPrices(historyPath, validationWindows, nowDate) {
+  const windowPrices = new Map();
+  const windowSeries = new Map();
+  try {
+    const history = readJson(historyPath || path.join(ROOT, 'data', 'scan-history.json'), { records: [] });
+    const records = Array.isArray(history.records) ? history.records : [];
+    const nowMs = nowDate ? nowDate.getTime() : Date.now();
+    const pending = [];
+    const pendingSeries = new Map();
+    for (const record of records) {
+      if (!record.entryPrice) continue;
+      const signalMs = Date.parse(record.timestamp);
+      if (!Number.isFinite(signalMs)) continue;
+      for (const days of validationWindows) {
+        if (nowMs - signalMs < days * 86400000) continue;
+        const existing = record.validations?.[`${days}D`];
+        const mapKey = `${record.ticker}:${days}`;
+        const needsPrice = existing?.candidateReturnPct == null;
+        const needsSeries = existing?.maePct == null;
+
+        if (!needsPrice && !needsSeries) continue;
+
+        if (needsPrice && !windowPrices.has(mapKey)) {
+          const targetDate = new Date(signalMs + days * 86400000).toISOString().slice(0, 10);
+          pending.push({ ticker: record.ticker, targetDate, mapKey });
+          windowPrices.set(mapKey, null);
+        }
+
+        if (needsSeries && !pendingSeries.has(record.ticker)) {
+          const startDate = new Date(signalMs).toISOString().slice(0, 10);
+          const maxDays = Math.max(...validationWindows);
+          const endDate = new Date(signalMs + maxDays * 86400000).toISOString().slice(0, 10);
+          pendingSeries.set(record.ticker, { startDate, endDate });
+        }
+      }
+    }
+    for (const { ticker, targetDate, mapKey } of pending.slice(0, 50)) {
+      const price = await getCloseAtDate(ticker, targetDate);
+      if (price != null) windowPrices.set(mapKey, price);
+      else windowPrices.delete(mapKey);
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    for (const [ticker, { startDate, endDate }] of [...pendingSeries.entries()].slice(0, 30)) {
+      const bars = await getBarsInRange(ticker, startDate, endDate);
+      if (bars.length > 0) windowSeries.set(ticker, bars);
+      await new Promise(r => setTimeout(r, 200));
+    }
+  } catch {
+    // non-blocking
+  }
+  return { windowPrices, windowSeries };
 }
 
 function adjustedOhlc(quote, adjClose, i) {

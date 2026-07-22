@@ -114,29 +114,23 @@
       "bias": "LONG",
       "setup": "Breakout after consolidation",
       "timestamp": 1783143507570
+    },
+    "XOM:LONG": {
+      "score": 82,
+      "bias": "LONG",
+      "setup": "Breakout after consolidation",
+      "timestamp": 1784754246022
     }
   },
   "lastScan": {
-    "timestamp": "2026-07-17T06:11:42.345Z",
+    "timestamp": "2026-07-22T22:38:25.687Z",
     "long": [
-      "MNST",
-      "MO",
-      "BTI",
-      "UNH",
-      "PM"
+      "XOM"
     ],
     "short": [],
     "monitor": [
-      "BKD",
-      "MRK",
-      "BIIB",
-      "MDLZ",
-      "NU",
-      "SBUX",
-      "EXC",
-      "PCAR",
-      "WBD",
-      "PG"
+      "GOOGL",
+      "WMT"
     ]
   },
   "autoScanRuns": {
@@ -160,6 +154,12 @@
       "pendingMessage": "🎯 <b>SCREENER — 1:00 PM (pre-cierre)</b>\nRégimen: <b>NEUTRAL</b>\n\n📈 <b>LONG:</b>\nSin candidatos\n\n📉 <b>SHORT:</b>\nSin candidatos\n\n👀 <b>MONITOR:</b>\nSin candidatos\n\nNo constituye recomendación financiera.",
       "scanTimestamp": "2026-07-07T19:21:05.458Z",
       "lastError": "getaddrinfo ENOTFOUND api.telegram.org"
+    },
+    "2026-07-22:preclose": {
+      "status": "missed",
+      "label": "1:00 PM (pre-cierre)",
+      "missedAt": "2026-07-22T23:44:48.164Z",
+      "lastError": "No se ejecutó dentro de la ventana programada"
     }
   }
 }

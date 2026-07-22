@@ -96,6 +96,9 @@ function updateExistingRecord(record, payload, nowIso, updatedRecordKeysThisScan
     seenCount
   });
   updateSignalSeen(record, nowIso, updatedRecordKeysThisScan);
+  if (!record.setupCategory && record.setup) {
+    record.setupCategory = classifySetup(record.setup);
+  }
 }
 
 function updateSignalSeen(record, nowIso, updatedRecordKeysThisScan) {
@@ -350,7 +353,7 @@ function toUiCandidate(record) {
     riskReward: record.riskReward ?? null,
     entrada: record.entryPrice,
     setup: record.setup || '',
-    setupCategory: record.setupCategory || 'UNKNOWN',
+    setupCategory: record.setupCategory || classifySetup(record.setup) || 'UNKNOWN',
     capCategory: record.capCategory || 'UNKNOWN',
     resultado_5d: result(5),
     resultado_15d: result(15),
@@ -376,19 +379,39 @@ function validateRecords(records, scanResult, validationWindows, neutralBand, va
   const now = Date.parse(scanResult.timestamp);
   for (const record of records) {
     const ageDays = (now - Date.parse(record.timestamp)) / 86400000;
-    const price = current.get(record.ticker);
-    if (price == null || record.entryPrice == null) continue;
+    const currentPrice = current.get(record.ticker);
+    if (record.entryPrice == null) continue;
     for (const days of validationWindows) {
       if (ageDays < days) continue;
       const key = `${days}D`;
       const existing = record.validations?.[key];
-      const series = validationSeries[record.ticker] || [];
+      const primarySeries = validationSeries[record.ticker];
+      const fallbackSeries = (scanResult.windowValidationSeries || {})[record.ticker];
+      const series = Array.isArray(primarySeries) && primarySeries.length > 0
+        ? primarySeries
+        : Array.isArray(fallbackSeries) && fallbackSeries.length > 0
+          ? fallbackSeries
+          : [];
       const excursion = calculateExcursion(record, series, days);
       if (existing && !excursion) continue;
-      const candidateReturn = ((price - record.entryPrice) / record.entryPrice) * 100;
-      const directionalReturn = record.bias === 'SHORT' ? -candidateReturn : candidateReturn;
-      const spyReturn = record.spyPriceAtScan && spyPrice ? ((spyPrice - record.spyPriceAtScan) / record.spyPriceAtScan) * 100 : null;
-      const alpha = spyReturn == null ? null : directionalReturn - spyReturn;
+      const price = currentPrice ??
+        ((scanResult.windowValidationPrices || {})[`${record.ticker}:${days}`]) ??
+        null;
+      if (price == null && existing?.candidateReturnPct == null) continue;
+      const candidateReturn = price == null
+        ? existing.candidateReturnPct
+        : ((price - record.entryPrice) / record.entryPrice) * 100;
+      const directionalReturn = price == null
+        ? existing.directionalReturnPct
+        : record.bias === 'SHORT' ? -candidateReturn : candidateReturn;
+      const spyReturn = price == null
+        ? existing.spyReturnPct
+        : record.spyPriceAtScan && spyPrice
+          ? ((spyPrice - record.spyPriceAtScan) / record.spyPriceAtScan) * 100
+          : null;
+      const alpha = price == null
+        ? existing.alphaPct
+        : spyReturn == null ? null : directionalReturn - spyReturn;
       record.validations[key] = {
         ...(existing || {}),
         candidateReturnPct: round(candidateReturn, 2),
@@ -410,11 +433,14 @@ function calculateExcursion(record, series, days) {
   const start = Date.parse(record.timestamp);
   if (!Number.isFinite(start)) return null;
   const end = start + days * 86400000;
-  const candles = series.filter(c => {
-    const ts = Date.parse(c.date);
-    return Number.isFinite(ts) && ts >= start && ts <= end &&
-      Number.isFinite(c.high) && Number.isFinite(c.low);
-  });
+  const signalDate = new Date(start).toISOString().slice(0, 10);
+  const endDate = new Date(end).toISOString().slice(0, 10);
+  const candles = series.filter(c =>
+    Number.isFinite(c.high) &&
+    Number.isFinite(c.low) &&
+    c.date >= signalDate &&
+    c.date <= endDate
+  );
   if (!candles.length) return null;
   const entry = Number(record.entryPrice);
   if (!Number.isFinite(entry) || entry === 0) return null;
