@@ -50,7 +50,7 @@ function findEligibleSlot(date, autoConfig) {
 function cleanOldRuns(runs, nowMs, keepDays = 30) {
   const cutoff = nowMs - keepDays * 86400000;
   return Object.fromEntries(Object.entries(runs || {}).filter(([, run]) => {
-    const timestamp = Date.parse(run.completedAt || run.lastAttemptAt || run.createdAt || 0);
+    const timestamp = Date.parse(run.completedAt || run.lastAttemptAt || run.createdAt || run.missedAt || 0);
     return Number.isFinite(timestamp) && timestamp >= cutoff;
   }));
 }
