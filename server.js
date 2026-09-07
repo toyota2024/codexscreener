@@ -14,6 +14,7 @@ const {
 } = require('./telegram/telegramBot');
 const { createAutoScanScheduler } = require('./scheduler/autoScanScheduler');
 const { authorizeBearer } = require('./utils/auth');
+const { getMarketSession } = require('./utils/marketHours');
 
 const ROOT = __dirname;
 const CONFIG_PATH = path.join(ROOT, 'config.json');
@@ -144,7 +145,19 @@ async function executeScan(options = {}) {
     const previous = readJson(LAST_SCAN_PATH, null);
     if (previous?.timestamp && Date.parse(previous.timestamp) >= Date.parse(options.reuseAfter)) return previous;
   }
-  activeScan = runScan(config)
+  if (options.allowRecentReuse) {
+    const previous = readJson(LAST_SCAN_PATH, null);
+    const previousTime = Date.parse(previous?.timestamp || '');
+    const session = getMarketSession();
+    const reuseMinutes = session.session === 'open'
+      ? config.scan?.reuseMinutesOpen
+      : config.scan?.reuseMinutesClosed;
+    const reuseMs = Math.max(0, Number(reuseMinutes) || 0) * 60 * 1000;
+    if (previousTime && reuseMs > 0 && Date.now() - previousTime <= reuseMs) {
+      return { ...previous, reused: true };
+    }
+  }
+  activeScan = runScan(config, options)
     .then(result => {
       const memory = readJson(MEMORY_PATH, { watchlist: [], lastAlerts: {}, lastScan: null });
       memory.lastScan = {
@@ -203,7 +216,8 @@ async function handle(req, res) {
     }
 
     if (url.pathname === '/api/scan') {
-      const result = await executeScan();
+      const force = url.searchParams.get('force') === '1';
+      const result = await executeScan({ allowRecentReuse: !force });
       return sendJson(res, 200, result);
     }
 

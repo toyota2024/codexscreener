@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const { httpsJson } = require('../utils/http');
+const { withCache } = require('../utils/cache');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_HOST = 'data.alpaca.markets';
@@ -69,18 +70,23 @@ async function getHistoricalBars(symbol, limit) {
   const safeLimit = Math.max(1, Number(limit) || 1);
   const startDate = new Date();
   startDate.setUTCDate(startDate.getUTCDate() - safeLimit * 2);
+  const startDateStr = startDate.toISOString().slice(0, 10);
   const query = new URLSearchParams({
     timeframe: '1Day',
     limit: String(safeLimit),
-    start: startDate.toISOString().slice(0, 10),
+    start: startDateStr,
     adjustment: 'all',
     feed: 'iex'
   });
-  const data = await request(
-    DATA_HOST,
-    `/v2/stocks/${safeSymbol}/bars?${query.toString()}`,
-    `histórico de ${symbol}`
-  );
+  const data = (await withCache(
+    `alpaca:historical:${safeSymbol}:${safeLimit}:${startDateStr}`,
+    60 * 60,
+    () => request(
+      DATA_HOST,
+      `/v2/stocks/${safeSymbol}/bars?${query.toString()}`,
+      `histórico de ${symbol}`
+    )
+  )).value;
   const candles = (Array.isArray(data?.bars) ? data.bars : [])
     .map(bar => ({
       date: new Date(bar.t).toISOString().slice(0, 10),
@@ -104,11 +110,15 @@ async function getHistoricalBars(symbol, limit) {
 async function getLatestPrice(symbol) {
   try {
     const safeSymbol = encodeURIComponent(String(symbol).trim().toUpperCase());
-    const data = await request(
-      DATA_HOST,
-      `/v2/stocks/${safeSymbol}/bars/latest?feed=iex`,
-      `precio actual de ${symbol}`
-    );
+    const data = (await withCache(
+      `alpaca:latest:${safeSymbol}`,
+      30,
+      () => request(
+        DATA_HOST,
+        `/v2/stocks/${safeSymbol}/bars/latest?feed=iex`,
+        `precio actual de ${symbol}`
+      )
+    )).value;
     const price = Number(data?.bar?.c);
     return Number.isFinite(price) ? price : null;
   } catch (error) {
@@ -120,11 +130,15 @@ async function getLatestPrice(symbol) {
 async function getAssetName(symbol) {
   try {
     const safeSymbol = encodeURIComponent(String(symbol).trim().toUpperCase());
-    const data = await request(
-      API_HOST,
-      `/v2/assets/${safeSymbol}`,
-      `nombre de activo ${symbol}`
-    );
+    const data = (await withCache(
+      `alpaca:asset:${safeSymbol}`,
+      24 * 60 * 60,
+      () => request(
+        API_HOST,
+        `/v2/assets/${safeSymbol}`,
+        `nombre de activo ${symbol}`
+      )
+    )).value;
     return typeof data?.name === 'string' ? data.name : '';
   } catch (error) {
     console.warn(error.message);
@@ -145,11 +159,15 @@ async function getCloseAtDate(symbol, targetDateStr) {
       feed: 'iex',
       limit: '10'
     });
-    const data = await request(
-      DATA_HOST,
-      `/v2/stocks/${safeSymbol}/bars?${query.toString()}`,
-      `precio histórico ${symbol} a ${targetDateStr}`
-    );
+    const data = (await withCache(
+      `alpaca:closeAt:${safeSymbol}:${targetDateStr}`,
+      24 * 60 * 60,
+      () => request(
+        DATA_HOST,
+        `/v2/stocks/${safeSymbol}/bars?${query.toString()}`,
+        `precio histórico ${symbol} a ${targetDateStr}`
+      )
+    )).value;
     const bars = (Array.isArray(data?.bars) ? data.bars : [])
       .map(b => ({ date: b.t.slice(0, 10), close: Number(b.c) }))
       .filter(b => Number.isFinite(b.close) && b.date <= targetDateStr)
@@ -171,11 +189,15 @@ async function getBarsInRange(symbol, startDateStr, endDateStr) {
       feed: 'iex',
       limit: '60'
     });
-    const data = await request(
-      DATA_HOST,
-      `/v2/stocks/${safeSymbol}/bars?${query.toString()}`,
-      `barras ${symbol} ${startDateStr} a ${endDateStr}`
-    );
+    const data = (await withCache(
+      `alpaca:range:${safeSymbol}:${startDateStr}:${endDateStr}`,
+      24 * 60 * 60,
+      () => request(
+        DATA_HOST,
+        `/v2/stocks/${safeSymbol}/bars?${query.toString()}`,
+        `barras ${symbol} ${startDateStr} a ${endDateStr}`
+      )
+    )).value;
     return (Array.isArray(data?.bars) ? data.bars : [])
       .map(b => ({
         date: b.t.slice(0, 10),

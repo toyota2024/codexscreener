@@ -8,10 +8,12 @@
     "maxUniverseSize": 240,
     "historyRange": "1y",
     "historyInterval": "1d",
-    "requestConcurrency": 6
+    "requestConcurrency": 6,
+    "reuseMinutesOpen": 5,
+    "reuseMinutesClosed": 15
   },
   "shadow": {
-    "enabled": true,
+    "enabled": false,
     "minimumCompleteMarketDays": 30,
     "minimumCompleteWindows": 20
   },
