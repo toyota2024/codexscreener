@@ -53,6 +53,8 @@ async function runScan(config, options = {}) {
   const market = await detectMarketRegime(indexMetrics.spy, indexMetrics.qqq);
   const buscarLongs = !market.blockLong;
   const buscarShorts = Boolean(market.shortAllowed);
+  const evaluateExceptionalShorts = market.bias === 'BULLISH' &&
+    config.filters?.allowExceptionalShortsInBullish === true;
   const spy20 = Number.isFinite(indexMetrics.spy?.returns20d) ? indexMetrics.spy.returns20d : null;
   const qqq20 = Number.isFinite(indexMetrics.qqq?.returns20d) ? indexMetrics.qqq.returns20d : null;
   const sectorMetricCache = new Map();
@@ -120,7 +122,14 @@ async function runScan(config, options = {}) {
         analyzed.push({ ticker: symbol, price: round(metrics.close), metrics });
         return;
       }
-      const scored = scoreCandidate(symbol, metrics, market, config, { buscarLongs, buscarShorts });
+      const scored = scoreCandidate(symbol, metrics, market, config, {
+        buscarLongs,
+        buscarShorts: buscarShorts || evaluateExceptionalShorts
+      });
+      if (evaluateExceptionalShorts && !buscarShorts && scored.short && !isExceptionalBullishShort(scored.short, metrics, config)) {
+        scored.diagnostics.SHORT.push('SHORT_BLOCKED_BY_BULLISH_REGIME');
+        scored.short = null;
+      }
       if (scored.long || scored.short) {
         validationSeries[symbol] = metrics.candles.map(c => ({
           date: c.date,
@@ -146,7 +155,11 @@ async function runScan(config, options = {}) {
   });
 
   if (deferScoring) {
-    applySectorPercentiles(analyzed, metricBySymbol, config, market, { buscarLongs, buscarShorts }, validationSeries, funnel, rejectionCounts, rejectionSamples);
+    applySectorPercentiles(analyzed, metricBySymbol, config, market, {
+      buscarLongs,
+      buscarShorts: buscarShorts || evaluateExceptionalShorts,
+      evaluateExceptionalShorts
+    }, validationSeries, funnel, rejectionCounts, rejectionSamples);
   }
 
   const allScored = analyzed
@@ -320,6 +333,10 @@ function applySectorPercentiles(analyzed, metricBySymbol, config, market, option
       ? (values.filter(value => value <= metrics.rsVsSector20d).length / values.length) * 100
       : null;
     const scored = scoreCandidate(item.ticker, metrics, market, config, options);
+    if (options.evaluateExceptionalShorts && !market.shortAllowed && scored.short && !isExceptionalBullishShort(scored.short, metrics, config)) {
+      scored.diagnostics.SHORT.push('SHORT_BLOCKED_BY_BULLISH_REGIME');
+      scored.short = null;
+    }
     item.long = scored.long;
     item.short = scored.short;
     item.diagnostics = scored.diagnostics;
@@ -328,6 +345,24 @@ function applySectorPercentiles(analyzed, metricBySymbol, config, market, option
     }
     observeScoredSides(item.ticker, scored, config, funnel, rejectionCounts, rejectionSamples);
   }
+}
+
+function isExceptionalBullishShort(candidate, metrics, config) {
+  const filters = config.filters || {};
+  const minScore = filters.exceptionalShortMinScore ?? config.scan?.minScore ?? 80;
+  const minWeakness = filters.exceptionalShortMinRsWeaknessPct ?? 5;
+  const maxRsi = filters.exceptionalShortMaxRsi ?? 50;
+  const spyWeakness = Number.isFinite(metrics.rsVsSpy20d) ? metrics.rsVsSpy20d <= -minWeakness : false;
+  const qqqWeakness = Number.isFinite(metrics.rsVsQqq20d) ? metrics.rsVsQqq20d <= -minWeakness : false;
+  return candidate.score >= minScore &&
+    candidate.riskReward >= filters.minRR &&
+    Number.isFinite(metrics.rsi14) &&
+    metrics.rsi14 <= maxRsi &&
+    Number.isFinite(metrics.close) &&
+    Number.isFinite(metrics.ema20) &&
+    metrics.close < metrics.ema20 &&
+    (spyWeakness || qqqWeakness) &&
+    !(candidate.observability?.rejectionCodes || []).length;
 }
 
 function recordRejections(counts, samples, ticker, codes = [], reasons = []) {

@@ -32,7 +32,11 @@
     "minDollarVolume20": 20000000,
     "maxAtrPct": 0.12,
     "minHistoryBars": 220,
-    "minRR": 2
+    "minRR": 2,
+    "allowExceptionalShortsInBullish": true,
+    "exceptionalShortMinScore": 75,
+    "exceptionalShortMinRsWeaknessPct": 5,
+    "exceptionalShortMaxRsi": 50
   },
   "scoreWeights": {
     "trend": 15,
