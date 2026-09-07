@@ -68,18 +68,22 @@ async function request(hostname, requestPath, operation) {
 async function getHistoricalBars(symbol, limit) {
   const safeSymbol = encodeURIComponent(String(symbol).trim().toUpperCase());
   const safeLimit = Math.max(1, Number(limit) || 1);
-  const startDate = new Date();
-  startDate.setUTCDate(startDate.getUTCDate() - safeLimit * 2);
+  const endDate = new Date();
+  const startDate = new Date(endDate);
+  startDate.setUTCDate(startDate.getUTCDate() - safeLimit * 3);
   const startDateStr = startDate.toISOString().slice(0, 10);
+  const endDateStr = endDate.toISOString().slice(0, 10);
   const query = new URLSearchParams({
     timeframe: '1Day',
     limit: String(safeLimit),
     start: startDateStr,
+    end: endDateStr,
     adjustment: 'all',
-    feed: 'iex'
+    feed: 'iex',
+    sort: 'desc'
   });
   const data = (await withCache(
-    `alpaca:historical:${safeSymbol}:${safeLimit}:${startDateStr}`,
+    `alpaca:historical:v2:${safeSymbol}:${safeLimit}:${startDateStr}:${endDateStr}`,
     60 * 60,
     () => request(
       DATA_HOST,
@@ -103,7 +107,8 @@ async function getHistoricalBars(symbol, limit) {
       Number.isFinite(candle.low) &&
       Number.isFinite(candle.close) &&
       Number.isFinite(candle.volume)
-    );
+    )
+    .sort((a, b) => a.date.localeCompare(b.date));
   return { candles, name: '' };
 }
 
